@@ -37,10 +37,6 @@ void error(char *msg) {
 /* 
  * main functions 
  */
-/* 
- * check the format of command line inputs
- * raise error if sth. wrong
- */
 void check_inputs(int argc, char **argv);
 void read_inputs(int argc, char **argv, int *portno, char *vidLoc, char *des_hostname, int *des_portno, int *need_file);
 int creat_socket();
