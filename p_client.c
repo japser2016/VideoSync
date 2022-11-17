@@ -79,7 +79,7 @@ void showS(char* name, char* arg);
 void showD(char* name, int arg);
 void showSep();
 int address_is_same(struct sockaddr_in s1, struct sockaddr_in s2);
-int client_is_new(struct sockaddr_in client_address, struct sockaddr_in *client_list);
+int client_is_new(struct sockaddr_in client_address, struct sockaddr_in *client_list, int client_list_counter);
  
 /*
  * testing funcitons
@@ -88,6 +88,8 @@ void _test_read_inputs(int portno, char *vidLoc, char *des_hostname, int des_por
 void _test_parentfd_serverAddress_no_bind(int parentfd, struct sockaddr_in serveraddr);
 void _test_prepare_select(fd_set main_set, int maxSocket, int parentfd);
 void _test_target_server_address_build(struct sockaddr_in targetaddr);
+void _test_address_is_same(struct sockaddr_in s1, struct sockaddr_in s2);
+void _test_client_is_new(struct sockaddr_in s1, struct sockaddr_in s2);
 
 
 /*****************************************************************/
@@ -108,6 +110,7 @@ int main(int argc, char **argv){
 	int play_signal = 0; /* receive play/pause signal from browser */
 	int time_stamp = 0; /* time stamp show watching progress */	
 	struct sockaddr_in *client_list = malloc(ARRAYSIZE * sizeof(struct sockaddr_in)); /* array to store clients */
+	bzero(client_list, ARRAYSIZE * sizeof(struct sockaddr_in));
 	int client_list_counter = 0; /* current client array counter */
 	
 	/* load inputs */
@@ -128,8 +131,12 @@ int main(int argc, char **argv){
 	
 	/* if I am a new client (not the first main client) */
 	if (argc == 5){
+		/* setup target server + store target server */
 		target_server_address_build(des_hostname, des_portno, &targetaddr);
 		_test_target_server_address_build(targetaddr);
+		_test_address_is_same(serveraddr, targetaddr);
+		_test_client_is_new(serveraddr, targetaddr);
+		
 	}
 	return 0;
 }
@@ -278,6 +285,7 @@ struct sockaddr_in target_server_address_build(char *des_hostname, int des_portn
  */
 int store_one_address(struct sockaddr_in client_address, struct sockaddr_in *client_list, int *client_list_counter){
 	return 0;
+	
 }
 
 /*
@@ -393,10 +401,20 @@ void showSep(){
 	printf("---------------------------------\n");
 }
 int address_is_same(struct sockaddr_in s1, struct sockaddr_in s2){
+	int result_sin_addr = memcmp(&(s1.sin_addr), &(s2.sin_addr), sizeof(s1.sin_addr));
+	int result_sin_port = memcmp(&(s1.sin_port), &(s2.sin_port), sizeof(s1.sin_port));
+	if (result_sin_addr == 0 && result_sin_port == 0){
+		return 1;
+	}
 	return 0;
 }
-int client_is_new(struct sockaddr_in client_address, struct sockaddr_in *client_list){
-	return 0;
+int client_is_new(struct sockaddr_in client_address, struct sockaddr_in *client_list, int client_list_counter){
+	for (int i = 0; i < client_list_counter; i++){
+		if (address_is_same(client_address, client_list[i]) == 1){
+			return 0;
+		}
+	}
+	return 1;
 }
  
 /************************************************/
@@ -437,6 +455,36 @@ void _test_target_server_address_build(struct sockaddr_in targetaddr){
 	showSep();
 	printf("_test_target_server_address_build:\n");
 	showD("targetaddr.sin_port", ntohs(targetaddr.sin_port));
+}
+void _test_address_is_same(struct sockaddr_in s1, struct sockaddr_in s2){
+	if (!test_flag)
+		return;
+	showSep();
+	printf("_test_address_is_same:\n");
+	showD("same_addresses", address_is_same(s1, s1));
+	showD("same_addresses", address_is_same(s2, s2));
+	showD("diff_addresses", address_is_same(s1, s2));
+}
+void _test_client_is_new(struct sockaddr_in s1, struct sockaddr_in s2){
+	if (!test_flag)
+		return;
+	showSep();
+	printf("_test_address_is_same:\n");
+	
+	struct sockaddr_in *client_list = malloc(ARRAYSIZE * sizeof(struct sockaddr_in));
+	bzero(client_list, ARRAYSIZE * sizeof(struct sockaddr_in));
+	int client_list_counter = 0;	
+	client_list[client_list_counter++] = s1;
+	showD("client_list_counter(1)", client_list_counter);
+	int new = client_is_new(s2, client_list, client_list_counter);
+	showD("is new", new);
+	int old = client_is_new(s1, client_list, client_list_counter);
+	showD("is NOT new", old);	
+	client_list[client_list_counter++] = s2;
+	showD("client_list_counter(2)", client_list_counter);
+	int oldd = client_is_new(s2, client_list, client_list_counter);
+	showD("is NOT new", oldd);	
+	free(client_list);	
 }
 
 
