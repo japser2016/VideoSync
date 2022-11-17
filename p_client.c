@@ -22,7 +22,7 @@
 #define BUFSIZE 1024
 #define ARRAYSIZE 32
 // each struct sockaddr_in has size 16 bytes -> 32*16 = 512 bytes
-#define test_flag 0
+#define test_flag 1
 #define REPEAT 2
 
 
@@ -42,11 +42,11 @@ void read_inputs(int argc, char **argv, int *portno, char *vidLoc, char *des_hos
 int creat_socket();
 int set_reuse_address(int parentfd);
 int set_timeout_address(int parentfd, int enable, int sec);
-struct sockaddr_in my_server_address_build(int parentfd, int portno);
-struct sockaddr_in socket_port_bind(int parentfd, int portno);
+void my_server_address_build(int portno, struct sockaddr_in *serveraddr);
+void socket_port_bind(int parentfd, struct sockaddr_in *serveraddr);
 void update_maxSocket(int* maxSocket, int currentSocket);
 void prepare_select(fd_set *main_set, int* maxSocket, int parentfd);
-struct sockaddr_in target_server_address_build(char *des_hostname, int des_portno);
+struct sockaddr_in target_server_address_build(char *des_hostname, int des_portno, struct sockaddr_in *targetaddr);
 int store_one_address(struct sockaddr_in client_address, struct sockaddr_in *client_list, int *client_list_counter);
 int store_address_list(struct sockaddr_in *out_client_address_list, struct sockaddr_in *client_list, int *client_list_counter);
 void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, int *play_signal, int *time_stamp, struct sockaddr_in *client_list, int *client_list_counter);
@@ -85,6 +85,10 @@ int client_is_new(struct sockaddr_in client_address, struct sockaddr_in *client_
  * testing funcitons
  */
 void _test_read_inputs(int portno, char *vidLoc, char *des_hostname, int des_portno, int need_file);
+void _test_parentfd_serverAddress_no_bind(int parentfd, struct sockaddr_in serveraddr);
+void _test_prepare_select(fd_set main_set, int maxSocket, int parentfd);
+void _test_target_server_address_build(struct sockaddr_in targetaddr);
+
 
 /*****************************************************************/
 int main(int argc, char **argv){
@@ -94,7 +98,8 @@ int main(int argc, char **argv){
 	char vidLoc[BUFSIZE]; /* video file location */ 
 	char des_hostname[BUFSIZE]; /* hostname to connect to */ 
 	int parentfd;  /* socket fd for my UDP socket */
-	struct sockaddr_in serveraddr; /* server's addr */
+	struct sockaddr_in serveraddr; /* server's addr (myself) */
+	struct sockaddr_in targetaddr; /* target server's addr (parent) */
 	fd_set main_set;   /* , temp_set;  fd_set of all sockets */
 	int maxSocket = 0; /* the max socket fd number */
 	
@@ -105,8 +110,27 @@ int main(int argc, char **argv){
 	struct sockaddr_in *client_list = malloc(ARRAYSIZE * sizeof(struct sockaddr_in)); /* array to store clients */
 	int client_list_counter = 0; /* current client array counter */
 	
+	/* load inputs */
+	check_inputs(argc, argv);
+	read_inputs(argc, argv, &portno, vidLoc, des_hostname, &des_portno, &need_file); 
+	_test_read_inputs(portno, vidLoc, des_hostname, des_portno, need_file);	
 	
+	/* set socket & server address & bind port*/
+	parentfd = creat_socket();	
+	set_reuse_address(parentfd);
+	my_server_address_build(portno, &serveraddr);
+	socket_port_bind(parentfd, &serveraddr);
+	_test_parentfd_serverAddress_no_bind(parentfd, serveraddr);
 	
+	/* prepare for select() */
+	prepare_select(&main_set, &maxSocket, parentfd);
+	_test_prepare_select(main_set, maxSocket, parentfd);
+	
+	/* if I am a new client (not the first main client) */
+	if (argc == 5){
+		target_server_address_build(des_hostname, des_portno, &targetaddr);
+		_test_target_server_address_build(targetaddr);
+	}
 	return 0;
 }
 
@@ -125,28 +149,59 @@ int main(int argc, char **argv){
  * raise error if sth. wrong
  */
 void check_inputs(int argc, char **argv){
-	
+	if (argc != 3 && argc != 5) {
+		fprintf(stderr, "usage: %s <port> <video file location> OR %s <port> <des_hostname> <des_port> <need_file 0/1>\n", argv[0], argv[0]);
+		exit(1);
+	}	
+	if (strlen(argv[2]) >= BUFSIZE){
+		fprintf(stderr, "<video file location>/<des_hostname>: too long\n");
+		exit(1);
+	}
+	if (argc == 5){
+		char c1 = '0';
+		char c2 = '1';
+		if ((*(argv[4]) != c1 && *(argv[4]) != c2) || strlen(argv[4]) != 1){
+			fprintf(stderr, "<need_file 0/1>: should be either 0 or 1\n");
+			exit(1);
+		}
+	}
 }
 
 /*
  * store command line inputs to variables
  */
 void read_inputs(int argc, char **argv, int *portno, char *vidLoc, char *des_hostname, int *des_portno, int *need_file){
-	
+	*portno = atoi(argv[1]);
+	if (argc == 3){
+		strcpy(vidLoc, argv[2]);
+	} else {
+		strcpy(des_hostname, argv[2]);
+		*des_portno = atoi(argv[3]);	
+		*need_file = atoi(argv[4]);	
+	}
 }
 
 /*
  * creat a new UDP socket
  */
 int creat_socket(){
-	return 0;
+	int new_socket = socket(AF_INET, SOCK_DGRAM, 0);
+	if (new_socket < 0) 
+		error("ERROR opening socket");
+	return new_socket;
 }
 
 /*
  * set the socket to be reusable for debugging
  */
 int set_reuse_address(int parentfd){
-	return 0;
+	int optval = 1;
+	int result = setsockopt(parentfd, SOL_SOCKET, SO_REUSEADDR, 
+				(const void *)&optval , sizeof(int));
+	if (result != 0){
+		printf("setsockopt for address reuse NOT success\n");
+	}
+	return result;
 }
 
 /*
@@ -159,35 +214,62 @@ int set_timeout_address(int parentfd, int enable, int sec){
 
 /*
  * build server's internet address 
- * and return the address structure (sockaddr_in)
+ * and store in the address structure (sockaddr_in) passed in
  */
-//struct sockaddr_in my_server_address_build(int parentfd, int portno){}
+void my_server_address_build(int portno, struct sockaddr_in *serveraddr){
+	bzero((char *) serveraddr, sizeof(*serveraddr));
+	serveraddr->sin_family = AF_INET;
+	serveraddr->sin_addr.s_addr = htonl(INADDR_ANY);
+	serveraddr->sin_port = htons((unsigned short)portno);
+}
 
 /*
  * bind socket (parentfd) with the port (portno)
  */
-//struct sockaddr_in socket_port_bind(int parentfd, int portno){}
+void socket_port_bind(int parentfd, struct sockaddr_in *serveraddr){
+	if (bind(parentfd, (struct sockaddr *) serveraddr, sizeof(*serveraddr)) < 0) 
+		error("ERROR on binding");	
+}
 
 /*
  * set maxSocket to be the larger one (compared to currentSocket)
  */
 void update_maxSocket(int* maxSocket, int currentSocket){
-	
+	if (*maxSocket < currentSocket){
+		*maxSocket = currentSocket;
+	}
 }
 
 /*
- * prepare fd_sets (main_set, temp_set) used by select()
+ * prepare fd_sets (main_set) used by select():
+ * set main_set to empty, and put parentfd into main_set
  * and call updata_maxSocket to update maxSocket
  */
 void prepare_select(fd_set *main_set, int* maxSocket, int parentfd){
-	
+	FD_ZERO(main_set);
+	//FD_ZERO(temp_set);
+	update_maxSocket(maxSocket, parentfd);
+	FD_SET(parentfd, main_set); 
 }
 
 /*
  * build target server's internet address (to send msg to)
  * and return the address structure (sockaddr_in)
  */
-//struct sockaddr_in target_server_address_build(char *des_hostname, int des_portno){}
+struct sockaddr_in target_server_address_build(char *des_hostname, int des_portno, struct sockaddr_in *targetaddr){
+	struct hostent *server = gethostbyname(des_hostname);
+    if (server == NULL) {
+        fprintf(stderr,"ERROR, no such host as %s\n", des_hostname);
+        exit(0);
+    }
+	
+	bzero((char *) targetaddr, sizeof(*targetaddr));
+	targetaddr->sin_family = AF_INET;
+	bcopy((char *)server->h_addr, 
+		  (char *)&targetaddr->sin_addr.s_addr, server->h_length);
+	targetaddr->sin_port = htons(des_portno);
+	return *targetaddr;
+}
 
 /*
  * check if client_address (sockaddr_in) existing in the client_list
@@ -301,9 +383,15 @@ int receives(int sockfd, char *buf, int buf_len, struct sockaddr_in *serveraddr,
 /************************************************/
 /**             helper functions                */
 /************************************************/
-void showS(char* name, char* arg){}
-void showD(char* name, int arg){}
-void showSep(){}
+void showS(char* name, char* arg){
+	printf("%s->%s\n", name, arg);
+}
+void showD(char* name, int arg){
+	printf("%s->%d\n", name, arg);
+}
+void showSep(){
+	printf("---------------------------------\n");
+}
 int address_is_same(struct sockaddr_in s1, struct sockaddr_in s2){
 	return 0;
 }
@@ -314,4 +402,45 @@ int client_is_new(struct sockaddr_in client_address, struct sockaddr_in *client_
 /************************************************/
 /**             testing functions               */
 /************************************************/
-void _test_read_inputs(int portno, char *vidLoc, char *des_hostname, int des_portno, int need_file){}
+void _test_read_inputs(int portno, char *vidLoc, char *des_hostname, int des_portno, int need_file){
+	if (!test_flag)
+		return;
+	showSep();
+	printf("_test_read_inputs:\n");	
+	showD("portno",portno);
+	showS("vidLoc",vidLoc);
+	showS("des_hostname",des_hostname);
+	showD("des_portno",des_portno);
+	showD("need_file",need_file);
+}
+void _test_parentfd_serverAddress_no_bind(int parentfd, struct sockaddr_in serveraddr){
+	if (!test_flag)
+		return;
+	showSep();
+	printf("_test_parentfd_serverAddress_no_bind:\n");
+	showD("parentfd",parentfd);
+	showD("serveraddr.sin_port", ntohs(serveraddr.sin_port));
+}
+void _test_prepare_select(fd_set main_set, int maxSocket, int parentfd){
+	if (!test_flag)
+		return;
+	showSep();
+	printf("_test_prepare_select:\n");
+	showD("parentfd",parentfd);
+	showD("maxSocket",maxSocket);
+	showD("FD_ISSET(parentfd, &main_set)",FD_ISSET(parentfd, &main_set));
+
+}
+void _test_target_server_address_build(struct sockaddr_in targetaddr){
+	if (!test_flag)
+		return;
+	showSep();
+	printf("_test_target_server_address_build:\n");
+	showD("targetaddr.sin_port", ntohs(targetaddr.sin_port));
+}
+
+
+
+
+
+
