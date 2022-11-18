@@ -56,7 +56,7 @@ int store_timestamp(struct timeval *time_stamp);
 int check_msg_type(char *buf, int msg_len);
 
 /* functions handle msg received */
-void handle_initial_hello(struct sockaddr_in *client_list, int *client_list_counter, struct sockaddr_in clientaddr);
+void handle_initial_hello(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct sockaddr_in clientaddr);
 void handle_userlist(struct sockaddr_in *client_list, int *client_list_counter);
 void handle_pause(int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in client);
 void handle_play(int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in client);
@@ -87,6 +87,8 @@ void showAddress(struct sockaddr_in targetaddr);
 int address_is_same(struct sockaddr_in s1, struct sockaddr_in s2);
 int client_is_new(struct sockaddr_in client_address, struct sockaddr_in *client_list, int client_list_counter);
 int timeS_is_same(struct timeval t1, struct timeval t2);
+int copy_clients_without(struct sockaddr_in *client_list_c, int *client_list_counter_c, struct sockaddr_in *client_list, int client_list_counter, struct sockaddr_in except);
+
  
 /*
  * testing funcitons
@@ -105,8 +107,10 @@ void _test_construct_pause();
 void _test_construct_play();
 void _test_send_to_all(int sockfd, struct sockaddr_in *client_list, int client_list_counter);
 void _test_construct_userlist();
-
-
+void _test_construct_userlist_ack();
+void _test_construct_pause_ack();
+void _test_construct_play_ack();
+void _test_copy_clients_without();
 
 /*****************************************************************/
 int main(int argc, char **argv){
@@ -356,6 +360,11 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 	_test_construct_play();
 	//_test_send_to_all(parentfd, client_list, *client_list_counter);
 	_test_construct_userlist();
+	_test_construct_userlist_ack();
+	_test_construct_pause_ack();
+	_test_construct_play_ack();
+	_test_copy_clients_without();
+	
 	/*******************************************/
 	
 	fd_set temp_set;
@@ -364,7 +373,7 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 		//_test_send_to_all(parentfd, client_list, *client_list_counter);
 		int same = state_signal_is_same(*play_state, *play_signal);
 		//*play_state = 1;
-		*play_signal = 1;
+		//*play_signal = 1;
 		if (same == 0){
 			if (*play_signal == 0){
 				/* set play state */
@@ -395,9 +404,9 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 		struct timeval timeout;
 		timeout.tv_sec = TIMEOUT;
 		timeout.tv_usec = 0;
-		printf("before select\n");
+		//printf("before select\n");
 		readyNo = select(*maxSocket+1, &temp_set, NULL, NULL, &timeout);
-		printf("after select\n");
+		//printf("after select\n");
 		if (readyNo < 0){
 			fprintf(stderr, "ERROR in select(): %d\n", errno);
 			break;
@@ -408,6 +417,7 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 			struct sockaddr_in clientaddr;
 			int clientlen = sizeof(clientaddr);
 			bzero((char *) &clientaddr, sizeof(clientaddr));
+			
 			int len = recvfrom(parentfd, buf, BUFSIZE, 0,
 					(struct sockaddr *) &clientaddr, &clientlen);
 			int msg_type = check_msg_type(buf, len);
@@ -420,7 +430,7 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 			switch(msg_type){
 				case 1:
 					/* if INITIAL HELLO */
-					handle_initial_hello(client_list, client_list_counter, clientaddr);
+					handle_initial_hello(parentfd, client_list, client_list_counter, clientaddr);
 			}
 			
 			//deal_clients(parentfd, main_set, &temp_set, maxSocket, readyNo, client_list, &client_list_counter);
@@ -476,8 +486,30 @@ int check_msg_type(char *buf, int msg_len){
  * send client list
  * store new client
  */
-void handle_initial_hello(struct sockaddr_in *client_list, int *client_list_counter, struct sockaddr_in clientaddr){
-	
+void handle_initial_hello(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct sockaddr_in clientaddr){
+	int new = client_is_new(clientaddr, client_list, *client_list_counter);
+	if ( new == 1){
+		/* send client list */
+		char buf[BUFSIZE];
+		bzero(buf, BUFSIZE);
+		int buf_len = construct_userlist(buf, client_list, *client_list_counter);
+		int send_bytes = sends(sockfd, buf, buf_len, clientaddr);
+		/* store new client */
+		int store_result = store_one_address(clientaddr, client_list, client_list_counter);
+	} else {
+		/* copy a client list without current client */
+		struct sockaddr_in *client_list_c = malloc(ARRAYSIZE * sizeof(struct sockaddr_in));
+		bzero(client_list_c, ARRAYSIZE * sizeof(struct sockaddr_in));
+		int client_list_counter_c = 0;
+		int copied_num = copy_clients_without(client_list_c, &client_list_counter_c, client_list, *client_list_counter, clientaddr);
+		/* send client list */
+		char buf[BUFSIZE];
+		bzero(buf, BUFSIZE);
+		int buf_len = construct_userlist(buf, client_list_c, client_list_counter_c);
+		int send_bytes = sends(sockfd, buf, buf_len, clientaddr);	
+		
+		free(client_list_c);		
+	}
 }
 
 /*
@@ -550,7 +582,11 @@ int construct_pause(char *buf, struct timeval time_stamp){
 	return len;
 }
 int construct_pause_ack(char *buf){
-	return 0;
+	bzero(buf, BUFSIZE);
+	int buf_len = 0;
+	/* add msg type */
+	buf[buf_len++] = (char)6;
+	return buf_len;
 }
 int construct_play(char *buf, struct timeval time_stamp){
 	bzero(buf, BUFSIZE);
@@ -561,8 +597,13 @@ int construct_play(char *buf, struct timeval time_stamp){
 	return len;
 }
 int construct_play_ack(char *buf){
-	return 0;
+	bzero(buf, BUFSIZE);
+	int buf_len = 0;
+	/* add msg type */
+	buf[buf_len++] = (char)7;
+	return buf_len;
 }
+/* when client_list empy, its buf_len would just be 1 */
 int construct_userlist(char *buf, struct sockaddr_in *client_list, int client_list_counter){
 	// check if buf size >= list size
 	bzero(buf, BUFSIZE);
@@ -575,7 +616,11 @@ int construct_userlist(char *buf, struct sockaddr_in *client_list, int client_li
 	return buf_len;
 }
 int construct_userlist_ack(char *buf){
-	return 0;
+	bzero(buf, BUFSIZE);
+	int buf_len = 0;
+	/* add msg type */
+	buf[buf_len++] = (char)5;
+	return buf_len;
 }
 
 /* receive functions */
@@ -643,6 +688,21 @@ int timeS_is_same(struct timeval t1, struct timeval t2){
 		return 1;
 	}
 	return 0;
+}
+/* 
+ * copy all other clients without the specifc one provided 
+ * return how many clients copied
+ */
+int copy_clients_without(struct sockaddr_in *client_list_c, int *client_list_counter_c, struct sockaddr_in *client_list, int client_list_counter, struct sockaddr_in except){
+	*client_list_counter_c = 0;
+	bzero(client_list_c, ARRAYSIZE * sizeof(struct sockaddr_in));
+	for (int i = 0; i < client_list_counter; i++){
+		int same = address_is_same(client_list[i], except);
+		if (same != 1){
+			client_list_c[(*client_list_counter_c)++] = client_list[i];
+		}
+	}
+	return *client_list_counter_c;
 }
  
 /************************************************/
@@ -974,6 +1034,7 @@ void _test_construct_userlist(){
 	int index;
 	
 	struct sockaddr_in *client_list = malloc(ARRAYSIZE * sizeof(struct sockaddr_in));
+	bzero(client_list, ARRAYSIZE * sizeof(struct sockaddr_in));
 	int client_list_counter = 0;
 	
 	struct sockaddr_in s1;
@@ -1021,8 +1082,148 @@ void _test_construct_userlist(){
 		return;
 	}
 	
+	testNo = 5;
+	bzero(client_list, ARRAYSIZE * sizeof(struct sockaddr_in));
+	client_list_counter = 0;
+	len = construct_userlist(buf, client_list, client_list_counter);
+	if (len != 1 || buf[0]!=2){
+		showFail(testNo);
+		return;
+	}
 	
 	free(client_list);
+}
+void _test_construct_userlist_ack(){
+	if (!test_flag)
+		return;
+	showSep();
+	printf("_test_construct_userlist_ack:\n");
+	
+	char buf[BUFSIZE];
+	bzero(buf, BUFSIZE);
+	int buf_len;
+	int testNo;
+	
+	testNo = 1;
+	buf_len = construct_userlist_ack(buf);
+	if (buf_len != 1 || buf[0] != 5){
+		showFail(testNo);
+		return;
+	}
+}
+void _test_construct_pause_ack(){
+	if (!test_flag)
+		return;
+	showSep();
+	printf("_test_construct_pause_ack:\n");
+	
+	char buf[BUFSIZE];
+	bzero(buf, BUFSIZE);
+	int buf_len;
+	int testNo;
+	
+	testNo = 1;
+	buf_len = construct_pause_ack(buf);
+	if (buf_len != 1 || buf[0] != 6){
+		showFail(testNo);
+		return;
+	}
+}
+void _test_construct_play_ack(){
+	if (!test_flag)
+		return;
+	showSep();
+	printf("_test_construct_play_ack:\n");
+	
+	char buf[BUFSIZE];
+	bzero(buf, BUFSIZE);
+	int buf_len;
+	int testNo;
+	
+	testNo = 1;
+	buf_len = construct_play_ack(buf);
+	if (buf_len != 1 || buf[0] != 7){
+		showFail(testNo);
+		return;
+	}
+}
+void _test_copy_clients_without(){
+	if (!test_flag)
+		return;
+	showSep();
+	printf("_test_copy_clients_without:\n");
+	int testNo = 0;
+	int result_counter;
+	
+	struct sockaddr_in *client_list = malloc(ARRAYSIZE * sizeof(struct sockaddr_in));
+	bzero(client_list, ARRAYSIZE * sizeof(struct sockaddr_in));
+	int client_list_counter = 0;	
+	
+	struct sockaddr_in *client_list_c = malloc(ARRAYSIZE * sizeof(struct sockaddr_in));
+	bzero(client_list_c, ARRAYSIZE * sizeof(struct sockaddr_in));
+	int client_list_counter_c = 0;
+	
+	struct sockaddr_in s0;
+	target_server_address_build("localhost", 8888, &s0);
+	struct sockaddr_in s1;
+	target_server_address_build("localhost", 9999, &s1);
+	struct sockaddr_in s2;
+	target_server_address_build("localhost", 1000, &s2);
+	struct sockaddr_in s3;
+	target_server_address_build("localhost", 1500, &s3);
+	struct sockaddr_in s11;
+	target_server_address_build("localhost", 2000, &s11);
+	
+	/* load client_list */
+	client_list[client_list_counter++] = s0;
+	client_list[client_list_counter++] = s1;
+	client_list[client_list_counter++] = s2;
+	client_list[client_list_counter++] = s3;
+	
+	testNo = 1;
+	result_counter = copy_clients_without(client_list_c, &client_list_counter_c, client_list, client_list_counter, s11);
+	if (result_counter != 4){
+		showFail(testNo);
+		return;
+	}
+	testNo = 2;
+	for (int i = 0; i < client_list_counter_c; i++){
+		int same = address_is_same(client_list_c[i], client_list[i]);
+		if (same != 1){
+			showFail(testNo);
+			return;
+		}
+	}
+	
+	testNo = 3;
+	result_counter = copy_clients_without(client_list_c, &client_list_counter_c, client_list, client_list_counter, s1);
+	if (result_counter != 3){
+		showFail(testNo);
+		return;
+	}
+	testNo = 4;
+	int same = address_is_same(client_list_c[0], client_list[0]);
+	if (same != 1){
+		showFail(testNo);
+		return;
+	}
+	for (int i = 1; i < client_list_counter_c; i++){
+		int same = address_is_same(client_list_c[i], client_list[i+1]);
+		if (same != 1){
+			showFail(testNo);
+			return;
+		}
+	}
+	
+	testNo = 5;
+	bzero(client_list, ARRAYSIZE * sizeof(struct sockaddr_in));
+	client_list_counter = 0;
+	client_list[client_list_counter++] = s1;
+	result_counter = copy_clients_without(client_list_c, &client_list_counter_c, client_list, client_list_counter, s1);
+	if (result_counter != 0){
+		showFail(testNo);
+		return;
+	}
 }
 
 
