@@ -24,7 +24,7 @@
 // each struct sockaddr_in has size 16 bytes -> 32*16 = 512 bytes
 #define test_flag 1
 #define REPEAT 2
-#define TIMEOUT 2  //for select timeout in seconds
+#define TIMEOUT 1  //for select timeout in seconds
 
 
 /*
@@ -49,22 +49,22 @@ void update_maxSocket(int* maxSocket, int currentSocket);
 void prepare_select(fd_set *main_set, int* maxSocket, int parentfd);
 struct sockaddr_in target_server_address_build(char *des_hostname, int des_portno, struct sockaddr_in *targetaddr);
 int store_one_address(struct sockaddr_in client_address, struct sockaddr_in *client_list, int *client_list_counter);
-int store_address_list(struct sockaddr_in *out_client_address_list, struct sockaddr_in *client_list, int *client_list_counter);
+int store_address_list(struct sockaddr_in *out_client_address_list, int out_client_address_list_counter, struct sockaddr_in *client_list, int *client_list_counter);
 void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in *client_list, int *client_list_counter);
 int state_signal_is_same(int play_state, int play_signal);
-int store_timestamp(struct timeval *time_stamp);
+void store_timestamp(struct timeval *time_stamp, struct timeval target_stamp);
 int check_msg_type(char *buf, int msg_len);
 
 /* functions handle msg received */
 void handle_initial_hello(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct sockaddr_in clientaddr);
-void handle_userlist(struct sockaddr_in *client_list, int *client_list_counter);
-void handle_pause(int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in client);
-void handle_play(int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in client);
+void handle_userlist(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct sockaddr_in clientaddr, char *msg, int msg_len);
+void handle_pause(int sockfd, int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in clientaddr, char *msg, int msg_len);
+void handle_play(int sockfd, int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in clientaddr, char *msg, int msg_len);
 
 /* send functions */
 int sends(int sockfd, char *buf, int buf_len, struct sockaddr_in targetaddr);
 int send_to_all(int sockfd, char *buf, int buf_len, struct sockaddr_in *client_list, int client_list_counter, int repeat_time);
-int construct_inital_hello(char *buf, int need_file);
+int construct_initial_hello(char *buf, int need_file);
 int construct_pause(char *buf, struct timeval time_stamp);
 int construct_pause_ack(char *buf);
 int construct_play(char *buf, struct timeval time_stamp);
@@ -84,6 +84,7 @@ void showSep();
 void showPass(int i);
 void showFail(int i);
 void showAddress(struct sockaddr_in targetaddr);
+void showTimestamp(struct timeval tv);
 int address_is_same(struct sockaddr_in s1, struct sockaddr_in s2);
 int client_is_new(struct sockaddr_in client_address, struct sockaddr_in *client_list, int client_list_counter);
 int timeS_is_same(struct timeval t1, struct timeval t2);
@@ -100,7 +101,7 @@ void _test_target_server_address_build(struct sockaddr_in targetaddr);
 void _test_address_is_same(struct sockaddr_in s1, struct sockaddr_in s2);
 void _test_client_is_new(struct sockaddr_in s1, struct sockaddr_in s2);
 void _test_store_one_address(struct sockaddr_in s1, struct sockaddr_in s2);
-void _test_construct_inital_hello();
+void _test_construct_initial_hello();
 //void _test_sends();
 void _test_state_signal_is_same();
 void _test_construct_pause();
@@ -111,6 +112,8 @@ void _test_construct_userlist_ack();
 void _test_construct_pause_ack();
 void _test_construct_play_ack();
 void _test_copy_clients_without();
+void _test_store_address_list();
+void _test_store_timestamp();
 
 /*****************************************************************/
 int main(int argc, char **argv){
@@ -167,8 +170,8 @@ int main(int argc, char **argv){
 		_test_store_one_address(serveraddr, targetaddr);
 		result = store_one_address(targetaddr, client_list, &client_list_counter);			
 		
-		_test_construct_inital_hello();
-		len = construct_inital_hello(buf, need_file);
+		_test_construct_initial_hello();
+		len = construct_initial_hello(buf, need_file);
 		/* send INITIAL HELLO - REPEAT times */
 		for (int i = 0; i < REPEAT; i++){
 			sends(parentfd, buf, len, targetaddr);
@@ -343,8 +346,11 @@ int store_one_address(struct sockaddr_in client_address, struct sockaddr_in *cli
  * store the whole client list provided (out_client_address_list) 
  * to our local list (append)
  */
-int store_address_list(struct sockaddr_in *out_client_address_list, struct sockaddr_in *client_list, int *client_list_counter){
-	return 0;
+int store_address_list(struct sockaddr_in *out_client_address_list, int out_client_address_list_counter, struct sockaddr_in *client_list, int *client_list_counter){
+	for (int i = 0; i < out_client_address_list_counter; i++){
+		client_list[(*client_list_counter)++] = out_client_address_list[i];
+	}
+	return *client_list_counter;
 }
 
 /*
@@ -358,28 +364,41 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 	_test_state_signal_is_same();
 	_test_construct_pause();
 	_test_construct_play();
+	/* this _test_send_to_all would just send to parent, use the one in the while loop to test*/
 	//_test_send_to_all(parentfd, client_list, *client_list_counter);
 	_test_construct_userlist();
 	_test_construct_userlist_ack();
 	_test_construct_pause_ack();
 	_test_construct_play_ack();
 	_test_copy_clients_without();
+	_test_store_address_list();
+	_test_store_timestamp();
+	
 	
 	/*******************************************/
 	
 	fd_set temp_set;
-	int readyNo = 0;
+	int readyNo = 0;	
 	while(1){
 		//_test_send_to_all(parentfd, client_list, *client_list_counter);
+		
+		/***************************************************/
 		int same = state_signal_is_same(*play_state, *play_signal);
-		//*play_state = 1;
-		//*play_signal = 1;
+		
+		
 		if (same == 0){
 			if (*play_signal == 0){
 				/* set play state */
 				*play_state = 0;
 				/* store/change timestamp */
-				store_timestamp(time_stamp);
+				/*********************************/
+				struct timeval FAKE_STAMP; // need to be replaced by real time stamp from player
+				bzero(&FAKE_STAMP,sizeof(struct timeval));
+				FAKE_STAMP.tv_sec = 100;
+				FAKE_STAMP.tv_usec = 500000;
+				/*********************************/				
+				store_timestamp(time_stamp, FAKE_STAMP);
+				
 				/* construct and send PAUSE */
 				char buf[BUFSIZE];
 				bzero(buf, BUFSIZE);
@@ -388,7 +407,14 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 				
 			} else {
 				/* store/change timestamp */
-				store_timestamp(time_stamp);
+				/*********************************/
+				struct timeval FAKE_STAMP; // need to be replaced by real time stamp from player
+				bzero(&FAKE_STAMP,sizeof(struct timeval));
+				FAKE_STAMP.tv_sec = 100;
+				FAKE_STAMP.tv_usec = 500000;
+				/*********************************/					
+				store_timestamp(time_stamp, FAKE_STAMP);
+				
 				/* construct and send PLAY */
 				char buf[BUFSIZE];
 				bzero(buf, BUFSIZE);
@@ -422,28 +448,32 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 					(struct sockaddr *) &clientaddr, &clientlen);
 			int msg_type = check_msg_type(buf, len);
 			/* show msg for debugging */
-			showSep();
-			showD("len(received)", len);
-			showS("buf", buf);
-			showD("msgType", msg_type);	
-			/* handle messages */
+			if (test_flag == 1){
+				showSep();
+				showD("len(received)", len);
+				showS("buf", buf);
+				showD("msgType", msg_type);	
+				showD("client_list_counter", *client_list_counter);
+			}			
+			/* handle received messages */
 			switch(msg_type){
 				case 1:
 					/* if INITIAL HELLO */
 					handle_initial_hello(parentfd, client_list, client_list_counter, clientaddr);
+					break;
+				case 2:
+					/* if USER LIST */
+					handle_userlist(parentfd, client_list, client_list_counter, clientaddr, buf, len);
+					break;
+				case 3:
+					/* if PAUSE */
+					handle_pause(parentfd, play_state, play_signal, time_stamp, clientaddr, buf, len);
+					break;
+				case 4:
+					/* if PLAY */
+					handle_play(parentfd, play_state, play_signal, time_stamp, clientaddr, buf, len);
+					break;
 			}
-			
-			//deal_clients(parentfd, main_set, &temp_set, maxSocket, readyNo, client_list, &client_list_counter);
-			
-			
-			/* test INITIAL HELLO 
-			if (len != 2 || buf[0] != 1 || buf[1] != 1){
-				showFail(1);
-			}
-			*/
-			
-			
-			
 		}
 		
 	}
@@ -464,8 +494,10 @@ int state_signal_is_same(int play_state, int play_signal){
 /*
  * store the current time stamp from the video (local)
  */
-int store_timestamp(struct timeval *time_stamp){
-	return 1;
+void store_timestamp(struct timeval *time_stamp, struct timeval target_stamp){
+	bzero(time_stamp, sizeof(struct timeval));
+	(*time_stamp).tv_sec = target_stamp.tv_sec;
+	(*time_stamp).tv_usec = target_stamp.tv_usec;
 }
 
 /*
@@ -516,7 +548,49 @@ void handle_initial_hello(int sockfd, struct sockaddr_in *client_list, int *clie
  * send USER LIST ACK
  * store user list if local list is new (with only one peer)
  */
-void handle_userlist(struct sockaddr_in *client_list, int *client_list_counter){
+void handle_userlist(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct sockaddr_in clientaddr, char *msg, int msg_len){
+	/* send USER LIST ACK */
+	char buf[BUFSIZE];
+	bzero(buf, BUFSIZE);
+	int buf_len;
+	buf_len = construct_userlist_ack(buf);
+	int send_bytes = sends(sockfd, buf, buf_len, clientaddr);
+	/* store the received user list if I am new (with only parent in the client list)*/
+	if ((*client_list_counter) <= 1 && msg_len > 1){
+		/* load outside client list from msg to client_list_c */
+		struct sockaddr_in *client_list_c = malloc(ARRAYSIZE * sizeof(struct sockaddr_in));
+		bzero(client_list_c, ARRAYSIZE * sizeof(struct sockaddr_in));
+		int client_list_counter_c = 0;
+		
+		client_list_counter_c = (msg_len-1)/sizeof(struct sockaddr_in);
+		int copy_size = msg_len-1;
+		memcpy(client_list_c, &(msg[1]), copy_size);
+		
+		/* store the outside cliend list */
+		int result_list_counter = store_address_list(client_list_c, client_list_counter_c, client_list, client_list_counter);
+		
+		/******************BASIC TEST**************************/
+		/*
+		showSep();
+		printf("_test_inside_handle_userlist part 1:\n");
+		showD("result_list_counter(2)", result_list_counter);
+		showD("client_list_counter(2)", *client_list_counter);
+		int same = address_is_same(client_list[0], clientaddr);
+		showD("client_list[0] is same(1)", same);
+		same = address_is_same(client_list[1], *((struct sockaddr_in*)(&(msg[1]))));
+		showD("client_list[1] is same(1)", same);
+		*/
+		/************************************************/
+		
+		/* send INITIAL HELLO to all new friends EXCEPT the parent */
+		bzero(buf, BUFSIZE);
+		int need_file = 0; // change to 1 to ask for file from everyone
+		buf_len = construct_initial_hello(buf, need_file);
+		send_to_all(sockfd, buf, buf_len, &(client_list[1]), *client_list_counter-1, REPEAT);
+		
+		/* free copied list */
+		free(client_list_c);
+	}
 	
 }
 
@@ -525,8 +599,32 @@ void handle_userlist(struct sockaddr_in *client_list, int *client_list_counter){
  * set the time stamp (according to the message)
  * change play state and signal if diff
  */
-void handle_pause(int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in client){
-	
+void handle_pause(int sockfd, int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in clientaddr, char *msg, int msg_len){
+	/* send PAUSE ACK */
+	char buf[BUFSIZE];
+	bzero(buf, BUFSIZE);
+	int buf_len;
+	buf_len = construct_pause_ack(buf);
+	int send_bytes = sends(sockfd, buf, buf_len, clientaddr);
+	/* set time stamp according to the msg*/
+	if (msg_len != 17){
+		printf("\nhandle_pause: PAUSE msg's size is wrong! is: %d; should be 17\n", msg_len);
+		return;
+	}
+	store_timestamp(time_stamp, *((struct timeval *)(&(msg[1]))));
+	/* change play state to 0 (pause) if currently not */
+	if (*play_state == 1){
+		*play_signal = 0;
+		*play_state = 0;
+	}
+	/**************** test *****************/
+	if (test_flag == 1){
+		showSep();
+		printf("_test_inside_handle_pause:\n");
+		showD("play_signal", *play_signal);
+		showD("play_state", *play_state);
+		showTimestamp(*time_stamp);
+	}
 }
 
 /*
@@ -534,7 +632,32 @@ void handle_pause(int *play_state, int *play_signal, struct timeval *time_stamp,
  * set the time stamp (according to the message)
  * change play state and signal if diff
  */
-void handle_play(int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in client){
+void handle_play(int sockfd, int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in clientaddr, char *msg, int msg_len){
+	/* send PLAY ACK */
+	char buf[BUFSIZE];
+	bzero(buf, BUFSIZE);
+	int buf_len;
+	buf_len = construct_play_ack(buf);
+	int send_bytes = sends(sockfd, buf, buf_len, clientaddr);
+	/* set time stamp according to the msg*/
+	if (msg_len != 17){
+		printf("\nhandle_play: PLAY msg's size is wrong! is: %d; should be 17\n", msg_len);
+		return;
+	}
+	store_timestamp(time_stamp, *((struct timeval *)(&(msg[1]))));
+	/* change play state to 1 (pause) if currently not */
+	if (*play_state == 0){
+		*play_signal = 1;
+		*play_state = 1;
+	}
+	/**************** test *****************/
+	if (test_flag == 1){
+		showSep();
+		printf("_test_inside_handle_play:\n");
+		showD("play_signal", *play_signal);
+		showD("play_state", *play_state);
+		showTimestamp(*time_stamp);
+	}
 	
 }
 
@@ -552,7 +675,10 @@ int sends(int sockfd, char *buf, int buf_len, struct sockaddr_in targetaddr){
       error("ERROR in sendto");
 	return len;
 }
-/* send the buf to all the client in the client list (with repeat)*/
+/* 
+ * send the buf to all the clients in the client list (with repeat)
+ * return number of clients sent (have not tested yet)
+ */
 int send_to_all(int sockfd, char *buf, int buf_len, struct sockaddr_in *client_list, int client_list_counter, int repeat_time){
 	//check if store add the counter
 	int i = 0;
@@ -561,8 +687,9 @@ int send_to_all(int sockfd, char *buf, int buf_len, struct sockaddr_in *client_l
 			int len = sends(sockfd, buf, buf_len, client_list[i]);
 		}
 	}
+	return i;
 }
-int construct_inital_hello(char *buf, int need_file){
+int construct_initial_hello(char *buf, int need_file){
 	bzero(buf, BUFSIZE);
 	int len = 0;
 	buf[len++] = (char)1;
@@ -653,6 +780,10 @@ void showAddress(struct sockaddr_in targetaddr){
     showS("address", hostaddrp);
 	showD("port", ntohs(targetaddr.sin_port));
 }
+void showTimestamp(struct timeval tv){
+	printf("tv.sec->%li\n", tv.tv_sec);
+	printf("tv.usec->%li\n", tv.tv_usec);
+}
 /* return 1 for same, 0 for diff */
 int address_is_same(struct sockaddr_in s1, struct sockaddr_in s2){
 	/*
@@ -667,6 +798,7 @@ int address_is_same(struct sockaddr_in s1, struct sockaddr_in s2){
     showS("s2", hostaddrp2);
     showD("s2 port", ntohs(s2.sin_port));
 	*/
+	/*********************************/
 	int result_sin_addr = memcmp(&(s1.sin_addr.s_addr), &(s2.sin_addr.s_addr), sizeof(s1.sin_addr.s_addr));
 	int result_sin_port = memcmp(&(s1.sin_port), &(s2.sin_port), sizeof(s1.sin_port));
 	if (result_sin_addr == 0 && result_sin_port == 0){
@@ -848,22 +980,22 @@ void _test_store_one_address(struct sockaddr_in s1, struct sockaddr_in s2){
 	free(client_list);	
 }
 
-void _test_construct_inital_hello(){
+void _test_construct_initial_hello(){
 	if (!test_flag)
 		return;
 	showSep();
-	printf("_test_construct_inital_hello:\n");
+	printf("_test_construct_initial_hello:\n");
 	
 	char buf[BUFSIZE];
 	
-	int len = construct_inital_hello(buf, 0);
+	int len = construct_initial_hello(buf, 0);
 	int testNo = 1;
 	if (len != 2 || buf[0] != 1 || buf[1] != 0){
 		showFail(testNo);
 		return;
 	}
 	
-	len = construct_inital_hello(buf, 1);
+	len = construct_initial_hello(buf, 1);
 	testNo = 1;
 	if (len != 2 || buf[0] != 1 || buf[1] != 1){
 		showFail(testNo);
@@ -874,7 +1006,7 @@ void _test_construct_inital_hello(){
 	struct sockaddr_in s1;
 	target_server_address_build("localhost", 9999, &s1);
 	
-	int len = construct_inital_hello(buf, s1, 0);
+	int len = construct_initial_hello(buf, s1, 0);
 	int testNo = 1;
 	if (len != 18 || buf[0] != 1 || buf[17] != 0){
 		showFail(testNo);
@@ -886,7 +1018,7 @@ void _test_construct_inital_hello(){
 		showFail(testNo);
 	}
 	
-	len = construct_inital_hello(buf, s1, 1);
+	len = construct_initial_hello(buf, s1, 1);
 	testNo = 3;
 	if (len != 18 || buf[0] != 1 || buf[17] != 1){
 		showFail(testNo);
@@ -1184,6 +1316,8 @@ void _test_copy_clients_without(){
 	result_counter = copy_clients_without(client_list_c, &client_list_counter_c, client_list, client_list_counter, s11);
 	if (result_counter != 4){
 		showFail(testNo);
+		free(client_list);
+		free(client_list_c);
 		return;
 	}
 	testNo = 2;
@@ -1191,6 +1325,8 @@ void _test_copy_clients_without(){
 		int same = address_is_same(client_list_c[i], client_list[i]);
 		if (same != 1){
 			showFail(testNo);
+			free(client_list);
+			free(client_list_c);
 			return;
 		}
 	}
@@ -1199,18 +1335,24 @@ void _test_copy_clients_without(){
 	result_counter = copy_clients_without(client_list_c, &client_list_counter_c, client_list, client_list_counter, s1);
 	if (result_counter != 3){
 		showFail(testNo);
+		free(client_list);
+		free(client_list_c);
 		return;
 	}
 	testNo = 4;
 	int same = address_is_same(client_list_c[0], client_list[0]);
 	if (same != 1){
 		showFail(testNo);
+		free(client_list);
+		free(client_list_c);
 		return;
 	}
 	for (int i = 1; i < client_list_counter_c; i++){
 		int same = address_is_same(client_list_c[i], client_list[i+1]);
 		if (same != 1){
 			showFail(testNo);
+			free(client_list);
+			free(client_list_c);
 			return;
 		}
 	}
@@ -1222,7 +1364,124 @@ void _test_copy_clients_without(){
 	result_counter = copy_clients_without(client_list_c, &client_list_counter_c, client_list, client_list_counter, s1);
 	if (result_counter != 0){
 		showFail(testNo);
+		free(client_list);
+		free(client_list_c);
 		return;
+	}
+	free(client_list);
+	free(client_list_c);
+}
+void _test_store_address_list(){
+	if (!test_flag)
+		return;
+	showSep();
+	printf("_test_store_address_list:\n");
+	int testNo = 0;
+	int result_counter;
+	
+	/* local client list */
+	struct sockaddr_in *client_list = malloc(ARRAYSIZE * sizeof(struct sockaddr_in));
+	bzero(client_list, ARRAYSIZE * sizeof(struct sockaddr_in));
+	int client_list_counter = 0;
+	/* outside client list */
+	struct sockaddr_in *out_client_address_list = malloc(ARRAYSIZE * sizeof(struct sockaddr_in));
+	bzero(out_client_address_list, ARRAYSIZE * sizeof(struct sockaddr_in));
+	int out_client_address_list_counter = 0;
+	
+	/* prepare addresses */
+	struct sockaddr_in s0;
+	target_server_address_build("localhost", 8888, &s0);
+	struct sockaddr_in s1;
+	target_server_address_build("localhost", 9999, &s1);
+	struct sockaddr_in s2;
+	target_server_address_build("localhost", 1000, &s2);
+	struct sockaddr_in s3;
+	target_server_address_build("localhost", 1500, &s3);
+	struct sockaddr_in s11;
+	target_server_address_build("localhost", 2000, &s11);
+	
+	/* load out_client_address_list */
+	out_client_address_list[out_client_address_list_counter++] = s0;
+	out_client_address_list[out_client_address_list_counter++] = s1;
+	out_client_address_list[out_client_address_list_counter++] = s2;
+	out_client_address_list[out_client_address_list_counter++] = s3;
+	
+	/* tests */
+	testNo = 1;
+	result_counter = store_address_list(out_client_address_list, out_client_address_list_counter, client_list, &client_list_counter);
+	if (result_counter != 4){
+		showFail(testNo);
+	}
+	testNo = 2;
+	for (int i = 0; i < out_client_address_list_counter; i++){
+		int same = address_is_same(client_list[i], out_client_address_list[i]);
+		if (same != 1){
+			showFail(testNo);
+		}
+	}
+	
+	testNo = 3;
+	bzero(client_list, ARRAYSIZE * sizeof(struct sockaddr_in));
+	client_list_counter = 0;
+	client_list[client_list_counter++] = s11;
+	
+	result_counter = store_address_list(out_client_address_list, out_client_address_list_counter, client_list, &client_list_counter);
+	if (result_counter != 5){
+		showFail(testNo);
+	}
+	testNo = 4;
+	for (int i = 0; i < out_client_address_list_counter; i++){
+		int same = address_is_same(client_list[i+1], out_client_address_list[i]);
+		if (same != 1){
+			showFail(testNo);
+		}
+	}
+	testNo = 5;
+	int same = address_is_same(client_list[0], s11);
+	if (same != 1){
+		showFail(testNo);
+	}
+	
+	
+	free(client_list);
+	free(out_client_address_list);
+}
+
+void _test_store_timestamp(){
+	if (!test_flag)
+		return;
+	showSep();
+	printf("_test_store_timestamp:\n");
+	int testNo = 0;
+	
+	struct timeval target_stamp; 
+	bzero(&target_stamp,sizeof(struct timeval));
+	target_stamp.tv_sec = 100;
+	target_stamp.tv_usec = 500000;
+	
+	struct timeval time_stamp;
+	testNo = 1;
+	store_timestamp(&time_stamp, target_stamp);
+	if (time_stamp.tv_sec != 100 || time_stamp.tv_usec != 500000){
+		showFail(testNo);
+	}
+	
+	testNo = 2;
+	bzero(&target_stamp,sizeof(struct timeval));
+	target_stamp.tv_sec = 0;
+	target_stamp.tv_usec = 0;
+	store_timestamp(&time_stamp, target_stamp);
+	if (time_stamp.tv_sec != 0 || time_stamp.tv_usec != 0){
+		showFail(testNo);
+	}
+	
+	testNo = 3;
+	bzero(&target_stamp,sizeof(struct timeval));
+	target_stamp.tv_sec = 10086;
+	target_stamp.tv_usec = 983432;
+	store_timestamp(&time_stamp, target_stamp);
+	if (time_stamp.tv_sec != 10086 || time_stamp.tv_usec != 983432){
+		showFail(testNo);
 	}
 }
 
