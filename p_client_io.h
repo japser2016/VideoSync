@@ -1,4 +1,6 @@
 /* Sending and Receiving Functions from Client */
+#include <netinet/in.h>
+#include <sys/socket.h>
 
 #define BUFSIZE 1024
 
@@ -6,6 +8,7 @@ int send_video(int sockfd, char *vidLoc); // Sends video specified by the filena
 
 int receive_video(int sockfd); // Receives a video from the specified socket
 
+void serve_videofile(struct sockaddr_in serveraddr, struct sockaddr_in clientaddr, char *vidLoc);
 
 void error(char *msg);
 

@@ -19,6 +19,8 @@
 #include <sys/time.h>
 #include <errno.h>
 
+#include "p_client_io.h"
+
 #define BUFSIZE 1024
 #define ARRAYSIZE 32
 // each struct sockaddr_in has size 16 bytes -> 32*16 = 512 bytes
@@ -30,10 +32,10 @@
 /*
  * error - wrapper for perror
  */
-void error(char *msg) {
-  perror(msg);
-  exit(1);
-}
+/* void error(char *msg) { */
+/*   perror(msg); */
+/*   exit(1); */
+/* } */
 
 /* 
  * main functions 
@@ -50,10 +52,13 @@ void prepare_select(fd_set *main_set, int* maxSocket, int parentfd);
 struct sockaddr_in target_server_address_build(char *des_hostname, int des_portno, struct sockaddr_in *targetaddr);
 int store_one_address(struct sockaddr_in client_address, struct sockaddr_in *client_list, int *client_list_counter);
 int store_address_list(struct sockaddr_in *out_client_address_list, int out_client_address_list_counter, struct sockaddr_in *client_list, int *client_list_counter);
-void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in *client_list, int *client_list_counter);
+void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in *client_list, int *client_list_counter, int *need_file, struct sockaddr_in serveraddr, char *vidLoc);
 int state_signal_is_same(int play_state, int play_signal);
 void store_timestamp(struct timeval *time_stamp, struct timeval target_stamp);
 int check_msg_type(char *buf, int msg_len);
+void request_videofile(struct sockaddr_in serveraddr, struct sockaddr_in clientaddr,
+                       struct sockaddr_in *client_list, int client_list_counter, int parentfd);
+int client_need_file(char *buf);
 
 /* functions handle msg received */
 void handle_initial_hello(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct sockaddr_in clientaddr);
@@ -173,11 +178,14 @@ int main(int argc, char **argv){
 		_test_construct_initial_hello();
 		len = construct_initial_hello(buf, need_file);
 		/* send INITIAL HELLO - REPEAT times */
-		for (int i = 0; i < REPEAT; i++){
+        sends(parentfd, buf, len, targetaddr);
+        bzero(buf,BUFSIZE);
+        len = construct_initial_hello(buf, 0);
+		for (int i = 0; i < REPEAT-1; i++){
 			sends(parentfd, buf, len, targetaddr);
 		}
 	}
-	main_loop(&main_set, &maxSocket, parentfd, &play_state, &play_signal, &time_stamp, client_list, &client_list_counter);
+	main_loop(&main_set, &maxSocket, parentfd, &play_state, &play_signal, &time_stamp, client_list, &client_list_counter, &need_file, serveraddr, vidLoc);
 	
 	
 	free(client_list);
@@ -353,13 +361,40 @@ int store_address_list(struct sockaddr_in *out_client_address_list, int out_clie
 	return *client_list_counter;
 }
 
+void request_videofile(struct sockaddr_in serveraddr, struct sockaddr_in clientaddr,
+                       struct sockaddr_in *client_list, int client_list_counter, int parentfd) {
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) 
+        error("ERROR opening socket");
+    
+    if (connect(sockfd, (const struct sockaddr *)&clientaddr, sizeof(clientaddr)) < 0) {
+        int i = 0;
+        for (i = 0; i < client_list_counter; i++) {
+            char buf[BUFSIZE];
+            int len = construct_initial_hello(buf, 1);
+            sends(parentfd, buf, len, client_list[i]);
+            if (connect(sockfd, (const struct sockaddr *)&(client_list[i]), sizeof(client_list[i])) >= 0) {
+                receive_video(sockfd);
+                break;
+            }
+        }
+    } else
+        receive_video(sockfd);
+    close(sockfd);
+}
+
+int client_need_file(char *buf) {
+    return (int)buf[1];
+}
+
+
 /*
  * the main loop to handle 
  * user's commands (play/pause)
  * msg received from other peers 
  * eg. initial hello, user list, pause/play signal
  */
-void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in *client_list, int *client_list_counter){
+void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in *client_list, int *client_list_counter, int *need_file, struct sockaddr_in serveraddr, char *vidLoc){
 	/* tests */
 	_test_state_signal_is_same();
 	_test_construct_pause();
@@ -376,7 +411,7 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 	
 	
 	/*******************************************/
-	
+    
 	fd_set temp_set;
 	int readyNo = 0;	
 	while(1){
@@ -460,10 +495,16 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 				case 1:
 					/* if INITIAL HELLO */
 					handle_initial_hello(parentfd, client_list, client_list_counter, clientaddr);
+                    if (*need_file == 0 && client_need_file(buf))
+                        serve_videofile(serveraddr, clientaddr, vidLoc);
 					break;
 				case 2:
 					/* if USER LIST */
 					handle_userlist(parentfd, client_list, client_list_counter, clientaddr, buf, len);
+                    if (*need_file) {
+                        request_videofile(serveraddr, clientaddr, client_list, *client_list_counter, parentfd);
+                        *need_file = 0;
+                    }
 					break;
 				case 3:
 					/* if PAUSE */
@@ -474,6 +515,8 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 					handle_play(parentfd, play_state, play_signal, time_stamp, clientaddr, buf, len);
 					break;
 			}
+
+            
 		}
 		
 	}
@@ -585,7 +628,7 @@ void handle_userlist(int sockfd, struct sockaddr_in *client_list, int *client_li
 		/* send INITIAL HELLO to all new friends EXCEPT the parent */
 		bzero(buf, BUFSIZE);
 		int need_file = 0; // change to 1 to ask for file from everyone
-		buf_len = construct_initial_hello(buf, need_file);
+		buf_len = construct_initial_hello(buf, 0);
 		send_to_all(sockfd, buf, buf_len, &(client_list[1]), *client_list_counter-1, REPEAT);
 		
 		/* free copied list */
