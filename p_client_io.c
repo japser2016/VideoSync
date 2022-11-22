@@ -96,7 +96,7 @@ int receive_video(int sockfd) {
 
     if (vid->type != (char)8)
         return -1;
-    char filename[128] = "video";
+    char filename[128] = "video_player/video";
     printf("filename %s\n",vid->filename);
     //strcat(filename,strchr(vid->filename, '.'));
     char ack[1];

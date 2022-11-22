@@ -137,7 +137,7 @@ int main(int argc, char **argv){
 	
 	/* logic set */
 	int play_state = 0; /* 0 for pause, 1 for play */
-	int play_signal = 0; /* receive play/pause signal from browser */
+	int play_signal = 1; /* receive play/pause signal from browser */
 	struct timeval time_stamp; /* time stamp show watching progress */	
 	time_stamp.tv_sec = 0;
 	time_stamp.tv_usec = 0;
