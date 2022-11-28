@@ -1,101 +1,153 @@
 <html>
-<head>
-  <script type="text/javascript">
-    document.addEventListener("DOMContentLoaded", function() { startplayer(); }, false);
-var player;
+  <head>
+    <script type="text/javascript">
+      document.addEventListener("DOMContentLoaded", function() { startplayer(); }, false);
+      var player;
+      const port = 8081;
+      var playing = 0;
 
-function startplayer() 
-{
- player = document.getElementById('video_player');
- player.controls = false;
-}
-function play_vid()
-{
- player.play();
-}
-function pause_vid()
-{
- player.pause();
-}
-function stop_vid() 
-{
- player.pause();
- player.currentTime = 0;
-}
-function set_time(x)
-{
-    player.currentTime = x;
-}
-function change_vol()
-{
- player.volume=document.getElementById("change_vol").value;
-}
-  </script>
-<style type="text/css">
-  body
-{
- width:100%;
- margin:0 auto;
- padding:0px;
- font-family:helvetica;
- background-color:#BCF5A9;
-}
-#wrapper
-{
- text-align:center;
- margin:0 auto;
- padding:0px;
- width:995px;
-}
-#player_wrapper
-{
- position:relative;
- width:400px;
- margin-left:300px;
-}
-#video_player
-{
- width:400px;
-}
-#player_controls
-{
- top:98%;
- position:absolute;
- background-color:black;
- width:100%;
- padding:5px;
- box-sizing:border-box;
-}
-input[type="image"]
-{
- float:left;
- height:20px;
- margin-left:2px;
- margin-right:5px;
- margin-top:2px;
-}
-#vol_img
-{
- margin-left:150px;
- width:20px;
-}
-</style>
+      function startplayer() 
+      {
+          player = document.getElementById('video_player');
+          player.controls = false;
+          setInterval(get_data, 2000);
+      }
+      function play_vid()
+      {
+          playing = 1;
+          send_data();
+          //console.log(URL);
+          player.play();
+          
+      }
+      function pause_vid()
+      {
+          playing = 0;
+          send_data();
+          player.pause();
+      }
+      function stop_vid() 
+      {
+          playing = 0;
+          player.pause();
+          player.currentTime = 0;
+          send_data();
+      }
+      function set_time(x)
+      {
+          player.currentTime = x;
+          send_data();
+      }
+      function change_vol()
+      {
+          player.volume=document.getElementById("change_vol").value;
+      }
+      function send_data()
+      {
+          const URL = "http://localhost:" + port + "/output";
+          const data = {
+              "playing": playing,
+              "timestamp": player.currentTime
+          };
+          fetch(URL, {
+              method: "POST",
+              body: JSON.stringify(data),
+              headers: {
+                  "Content-type": "application/json; charset=UTF-8"
+              }
+          });
+      }
 
-</head>
-<body>
-<div id="wrapper">
- <div id='player_wrapper'>
-  <video id='video_player'>
-   <source src='video' type='video/mp4'>
-  </video>
-  <div id='player_controls'>
-   <input type="image" src="images/play.png" onclick="play_vid()" id="play_button">
-   <input type="image" src="images/pause.png" onclick="pause_vid()" id="pause_button">
-   <input type="image" src="images/stop.png" onclick="stop_vid()" id="stop_button">
-   <img src="images/volume.png" id="vol_img">
-   <input type="range" id="change_vol" onchange="change_vol()" step="0.05" min="0" max="1" value="1">
-  </div>
- </div>
-</div>
-</body>
+      function get_data()
+      {
+          const URL = "http://localhost:" + port + "/input";
+          fetch(URL)
+              .then(res => res.json())
+              .then(data => {
+                  
+                  if(data.changed) {
+                      console.log("updating video metadata with\nplaying: "+data.playing+
+                                  "\nand timestamp: "+data.timestamp);
+                      if (playing != data.playing) {
+                          playing = data.playing;
+                          if(playing)
+                              player.play();
+                          else
+                              player.pause();
+                      }
+                      if (Math.abs(player.currentTime - data.timestamp) > 1) {
+                          player.currentTime = data.timestamp;
+                      }
+                  }
+              });
+          
+      }
+    </script>
+    <style type="text/css">
+      body
+      {
+          width:100%;
+          margin:0 auto;
+          padding:0px;
+          font-family:helvetica;
+          background-color:#BCF5A9;
+      }
+      #wrapper
+      {
+          text-align:center;
+          margin:0 auto;
+          padding:0px;
+          width:995px;
+      }
+      #player_wrapper
+      {
+          position:relative;
+          width:400px;
+          margin-left:300px;
+      }
+      #video_player
+      {
+          width:400px;
+      }
+      #player_controls
+      {
+          top:98%;
+          position:absolute;
+          background-color:black;
+          width:100%;
+          padding:5px;
+          box-sizing:border-box;
+      }
+      input[type="image"]
+      {
+          float:left;
+          height:20px;
+          margin-left:2px;
+          margin-right:5px;
+          margin-top:2px;
+      }
+      #vol_img
+      {
+          margin-left:150px;
+          width:20px;
+      }
+    </style>
+
+  </head>
+  <body>
+    <div id="wrapper">
+      <div id='player_wrapper'>
+        <video id='video_player'>
+          <source src='images/sample.mp4' type='video/mp4'>
+        </video>
+        <div id='player_controls'>
+          <input type="image" src="images/play.png" onclick="play_vid()" id="play_button">
+          <input type="image" src="images/pause.png" onclick="pause_vid()" id="pause_button">
+          <input type="image" src="images/stop.png" onclick="stop_vid()" id="stop_button">
+          <img src="images/volume.png" id="vol_img">
+          <input type="range" id="change_vol" onchange="change_vol()" step="0.05" min="0" max="1" value="1">
+        </div>
+      </div>
+    </div>
+  </body>
 </html>

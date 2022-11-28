@@ -30,69 +30,98 @@ const mimeType = {
 // Create a server object
 var PORT = 8081
 
+var playing = 0;
+var timestamp = 0.0;
+var changed = 0;
+
 http.createServer( (req, res) => {
-     
-   
-    // Parsing the requested URL
-    const parsedUrl = url.parse(req.url);
-   
-    // If requested url is "/" like "http://localhost:1800/"
-    if(parsedUrl.pathname==="/"){
-        var filesLink="<ul>";
-        res.setHeader('Content-type', 'text/html');
-        var filesList=fs.readdirSync("./");
-        filesList.forEach(element => {
-            if(fs.statSync("./"+element).isFile()){
-                filesLink+=`<br/><li><a href='./${element}'>
+    
+    if (req.method == "GET") {
+        
+        // Parsing the requested URL
+        const parsedUrl = url.parse(req.url);
+        if(parsedUrl.pathname==="/input") {
+            const data = {
+                "changed": changed,
+                "playing": playing,
+                "timestamp": timestamp
+            };
+            if(changed) {
+                console.log("updating video metadata with\nplaying: "+playing+"\ntimestamp: "+timestamp);
+                changed = 0;
+            }
+            //res.setHeader('Content-type', 'application/json');
+            res.end(JSON.stringify(data));
+        }
+        else {
+            // If requested url is "/" like "http://localhost:1800/"
+            if(parsedUrl.pathname==="/"){
+                var filesLink="<ul>";
+                res.setHeader('Content-type', 'text/html');
+                var filesList=fs.readdirSync("./");
+                filesList.forEach(element => {
+                    if(fs.statSync("./"+element).isFile()){
+                        filesLink+=`<br/><li><a href='./${element}'>
                     ${element}
                 </a></li>` ;        
+                    }
+                });
+                
+                filesLink+="</ul>";
+                
+                res.end("<h1>List of files:</h1> " + filesLink);
             }
-        });
-          
-        filesLink+="</ul>";
-       
-        res.end("<h1>List of files:</h1> " + filesLink);
-    }
-   
-    /* Processing the requested file pathname to
-    avoid directory traversal like,
-    http://localhost:1800/../fileOutofContext.txt
-    by limiting to the current directory only. */
-    const sanitizePath = 
-    path.normalize(parsedUrl.pathname).replace(/^(\.\.[\/\\])+/, '');
-      
-    let pathname = path.join(__dirname, sanitizePath);
-      
-    if(!fs.existsSync(pathname)) {
-          
-        // If the file is not found, return 404
-        res.statusCode = 404;
-        res.end(`File ${pathname} not found!`);
-    }
-    else {
-          
-        // Read file from file system limit to 
-        // the current directory only.
-        fs.readFile(pathname, function(err, data) {
-            if(err){
-                res.statusCode = 500;
-                res.end(`Error in getting the file.`);
-            } 
+            
+            /* Processing the requested file pathname to
+               avoid directory traversal like,
+               http://localhost:1800/../fileOutofContext.txt
+               by limiting to the current directory only. */
+            const sanitizePath = 
+                  path.normalize(parsedUrl.pathname).replace(/^(\.\.[\/\\])+/, '');
+            
+            let pathname = path.join(__dirname, sanitizePath);
+            
+            if(!fs.existsSync(pathname)) {
+                
+                // If the file is not found, return 404
+                res.statusCode = 404;
+                res.end(`File ${pathname} not found!`);
+            }
             else {
-                  
-                // Based on the URL path, extract the
-                // file extension. Ex .js, .doc, ...
-                const ext = path.parse(pathname).ext;
-                  
-                // If the file is found, set Content-type
-                // and send data
-                res.setHeader('Content-type',
-                        mimeType[ext] || 'text/plain' );
-                  
-                res.end(data);
+                
+                // Read file from file system limit to 
+                // the current directory only.
+                fs.readFile(pathname, function(err, data) {
+                    if(err){
+                        res.statusCode = 500;
+                        res.end(`Error in getting the file.`);
+                    } 
+                    else {
+                        
+                        // Based on the URL path, extract the
+                        // file extension. Ex .js, .doc, ...
+                        const ext = path.parse(pathname).ext;
+                        
+                        // If the file is found, set Content-type
+                        // and send data
+                        res.setHeader('Content-type',
+                                      mimeType[ext] || 'text/plain' );
+                        
+                        res.end(data);
+                    }
+                });
             }
+        }
+    } else if(req.method == "POST") {
+        req.on('data', function(data) {
+            var req_data = JSON.parse(data);
+            console.log("playing: " + req_data.playing);
+            console.log("timestamp: " + req_data.timestamp);
+            playing = req_data.playing;
+            timestamp = req_data.timestamp;
         });
+        
     }
 }).listen(PORT);
-  
+
 console.log('Node.js web server at port 8081 is running..')
