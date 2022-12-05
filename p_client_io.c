@@ -58,14 +58,14 @@ int send_video(int sockfd, char *vidLoc) {
         return -1;
     
     int n,m = 0;
-    char *buf = malloc(8192);
+    char *buf = malloc(VIDBUFSIZE);
     
     int fd = open(vidLoc, O_RDONLY);
     do {
         
-        bzero(buf,8192);
+        bzero(buf,VIDBUFSIZE);
         
-        n = read(fd, buf, 8192);
+        n = read(fd, buf, VIDBUFSIZE);
         if (n < 0)
             error("failed to read file");
         /* printf("read %d bytes\n", n); */
@@ -104,11 +104,11 @@ int receive_video(int sockfd) {
     write(sockfd, ack, 1);
     
     int fd = open(filename, O_WRONLY|O_CREAT|O_SYNC|O_APPEND, S_IRUSR|S_IWUSR);
-    char *buf = malloc(8192);
+    char *buf = malloc(VIDBUFSIZE);
     while (n > 0) {
-        bzero(buf, 8192);
+        bzero(buf, VIDBUFSIZE);
 
-        n = read(sockfd, buf, 8192);
+        n = read(sockfd, buf, VIDBUFSIZE);
         
         if (n < 0)
             error("failed to read from socket");
