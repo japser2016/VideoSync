@@ -42,7 +42,17 @@ http.createServer( (req, res) => {
         const parsedUrl = url.parse(req.url);
         if(parsedUrl.pathname==="/input") {
             fs.readFile("../syncserver-output", function(err, data) {
-                sync-playing = data.slice(0,1)
+                if (!err) {
+                    var sync_playing = data.slice(0,1);
+                    var sync_timestamp = data.slice(2);
+
+                    if (playing != sync_playing) {
+                        playing = sync_playing;
+                        timestamp = sync_timestamp;
+                    }
+                }
+            });
+            
             const data = {
                 "changed": changed,
                 "playing": playing,
