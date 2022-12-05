@@ -2,3 +2,5 @@
 *.out
 test
 test/*
+*-output
+*-input
