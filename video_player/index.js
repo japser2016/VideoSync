@@ -24,7 +24,8 @@ const mimeType = {
     '.doc': 'application/msword',
     '.eot': 'application/vnd.ms-fontobject',
     '.ttf': 'application/font-sfnt',
-    '.mp4': 'video/mp4'
+    '.mp4': 'video/mp4',
+    '.webm': 'video/mp4'
 };
 
 // Create a server object
@@ -54,8 +55,8 @@ http.createServer( (req, res) => {
                     var temp2 = data.indexOf("\n", temp1 + 1);
                     var sync_timestamp = Number(data.slice(temp1 + 1,temp2));
                     var sync_index = Number(data.slice(data.indexOf("\n",temp2 + 1) + 1));
-                    console.log("p:"+sync_playing+"\nt:"+sync_timestamp+"\ni:"+sync_index+"\n");
-                    if (sync_index > index && playing != sync_playing) {
+                    
+                    if (sync_index > index) {
                         index = sync_index;
                         playing = sync_playing;
                         timestamp = sync_timestamp;
@@ -146,7 +147,6 @@ http.createServer( (req, res) => {
             
             //SEND TO SYNC SERVER
             var output = playing + "\n" + timestamp + "\n" + index;
-            
             fs.writeFile('../webserver-output', output, function (err) {
                 if (err) throw err;
             });
