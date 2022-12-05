@@ -178,7 +178,10 @@ int main(int argc, char **argv){
 	/* load inputs */
 	check_inputs(argc, argv);
 	read_inputs(argc, argv, &portno, vidLoc, des_hostname, &des_portno, &need_file); 
-	_test_read_inputs(portno, vidLoc, des_hostname, des_portno, need_file);	
+	_test_read_inputs(portno, vidLoc, des_hostname, des_portno, need_file);
+
+	if (!need_file)
+		system("node video_player/index.js");
 	
 	/* set socket & server address & bind port*/
 	parentfd = creat_socket();	
@@ -219,7 +222,7 @@ int main(int argc, char **argv){
 	
 	free(client_list);
 	client_list_counter = 0;
-	
+	system("killall node");
 	return 0;
 }
 
@@ -466,9 +469,11 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 		//_test_send_to_all(parentfd, client_list, *client_list_counter);
 		
 		/***************************************************/
-		int same = state_signal_is_same(*play_state, *play_signal);
+		FILE *other_side_file = fopen(player_file_name, "r");
 		
+		fclose(other_side_file);
 		
+		int same = state_signal_is_same(*play_state, *play_signal);		
 		if (same == 0){
 			if (*play_signal == 0){
 				/* set play state */
@@ -572,6 +577,7 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
                     if (*need_file) {
                         request_videofile(serveraddr, clientaddr, client_list, *client_list_counter, parentfd);
                         *need_file = 0;
+						system("node video_player/index.js");
                     }
 					break;
 				case 3:
@@ -704,6 +710,7 @@ void first_initial_hello_pkt_lost(int parentfd, int timeout, struct sockaddr_in 
 			if (*need_file) {
 				request_videofile(serveraddr, clientaddr, client_list, *client_list_counter, parentfd);
 				*need_file = 0;
+				system("node video_player/index.js");
 			}
 			break;
 		} else {
