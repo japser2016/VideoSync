@@ -33,6 +33,12 @@ var PORT = 8081
 var playing = 0;
 var timestamp = 0.0;
 var changed = 0;
+var index = 0;
+
+fs.writeFile("../webserver-output", "0\n0\n0", function(err) {
+    if(err) throw err;
+});
+
 
 http.createServer( (req, res) => {
     
@@ -43,12 +49,17 @@ http.createServer( (req, res) => {
         if(parsedUrl.pathname==="/input") {
             fs.readFile("../syncserver-output", function(err, data) {
                 if (!err) {
-                    var sync_playing = data.slice(0,1);
-                    var sync_timestamp = data.slice(2);
-
-                    if (playing != sync_playing) {
+                    var sync_playing = Number(data.slice(0,1));
+                    var temp1 = data.indexOf("\n");
+                    var temp2 = data.indexOf("\n", temp1 + 1);
+                    var sync_timestamp = Number(data.slice(temp1 + 1,temp2));
+                    var sync_index = Number(data.slice(data.indexOf("\n",temp2 + 1) + 1));
+                    console.log("p:"+sync_playing+"\nt:"+sync_timestamp+"\ni:"+sync_index+"\n");
+                    if (sync_index > index && playing != sync_playing) {
+                        index = sync_index;
                         playing = sync_playing;
                         timestamp = sync_timestamp;
+                        changed = 1;
                     }
                 }
             });
@@ -131,13 +142,14 @@ http.createServer( (req, res) => {
             console.log("timestamp: " + req_data.timestamp);
             playing = req_data.playing;
             timestamp = req_data.timestamp;
-
-
+            index = index + 1;
+            
             //SEND TO SYNC SERVER
-            fs.writeFile('../webserver-output', playing + "\n" + timestamp, function (err) {
+            var output = playing + "\n" + timestamp + "\n" + index;
+            
+            fs.writeFile('../webserver-output', output, function (err) {
                 if (err) throw err;
             });
-
             
         });
         
