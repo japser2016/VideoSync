@@ -75,9 +75,9 @@
                           else
                               player.pause();
                       }
-                      if (Math.abs(player.currentTime - data.timestamp) > 1) {
-                          player.currentTime = data.timestamp;
-                      }
+                      //if (Math.abs(player.currentTime - data.timestamp) > 2) {
+                      player.currentTime = data.timestamp;
+                      //}
                   }
               });
           

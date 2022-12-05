@@ -41,6 +41,8 @@ http.createServer( (req, res) => {
         // Parsing the requested URL
         const parsedUrl = url.parse(req.url);
         if(parsedUrl.pathname==="/input") {
+            fs.readFile("../syncserver-output", function(err, data) {
+                sync-playing = data.slice(0,1)
             const data = {
                 "changed": changed,
                 "playing": playing,
@@ -119,9 +121,18 @@ http.createServer( (req, res) => {
             console.log("timestamp: " + req_data.timestamp);
             playing = req_data.playing;
             timestamp = req_data.timestamp;
+
+
+            //SEND TO SYNC SERVER
+            fs.writeFile('../webserver-output', playing + "\n" + timestamp, function (err) {
+                if (err) throw err;
+            });
+
+            
         });
         
     }
 }).listen(PORT);
 
 console.log('Node.js web server at port 8081 is running..')
+
