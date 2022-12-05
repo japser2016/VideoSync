@@ -124,14 +124,3 @@ int receive_video(int sockfd) {
     free(buf);
     close(fd);
 }
-
-
-
-/* int main(int argc, char *argv[]) { */
-/*     if (argc != 2) */
-/*         return 1; */
-
-    
-/*     //send_video(1,"/GPP_Drive/Personal/Media/SFW/Videos/duvet.mp4"); */
-/*     return 0; */
-/* } */
