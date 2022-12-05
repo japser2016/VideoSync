@@ -36,7 +36,7 @@ var timestamp = 0.0;
 var changed = 0;
 var index = 0;
 
-fs.writeFile("../webserver-output", "0\n0\n0", function(err) {
+fs.writeFile("../webserver-output", "0\n0\n0\n", function(err) {
     if(err) throw err;
 });
 
@@ -71,7 +71,7 @@ http.createServer( (req, res) => {
                 "timestamp": timestamp
             };
             if(changed) {
-                console.log("updating video metadata with\nplaying: "+playing+"\ntimestamp: "+timestamp);
+                console.log("webserver updating video metadata with\nplaying: "+playing+"\ntimestamp: "+timestamp);
                 changed = 0;
             }
             //res.setHeader('Content-type', 'application/json');
@@ -139,14 +139,14 @@ http.createServer( (req, res) => {
     } else if(req.method == "POST") {
         req.on('data', function(data) {
             var req_data = JSON.parse(data);
-            console.log("playing: " + req_data.playing);
-            console.log("timestamp: " + req_data.timestamp);
+            //console.log("playing: " + req_data.playing);
+            //console.log("timestamp: " + req_data.timestamp);
             playing = req_data.playing;
             timestamp = req_data.timestamp;
             index = index + 1;
             
             //SEND TO SYNC SERVER
-            var output = playing + "\n" + timestamp + "\n" + index;
+            var output = playing + "\n" + timestamp + "\n" + index + "\n";
             fs.writeFile('../webserver-output', output, function (err) {
                 if (err) throw err;
             });
@@ -156,5 +156,5 @@ http.createServer( (req, res) => {
     }
 }).listen(PORT);
 
-console.log('Node.js web server at port 8081 is running..')
+console.log('Node.js web server at port '+PORT+' is running..')
 
