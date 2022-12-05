@@ -483,12 +483,13 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 				*play_state = 0;
 				/* store/change timestamp */
 				/*********************************/
+				/*
 				struct timeval FAKE_STAMP; // need to be replaced by real time stamp from player
 				bzero(&FAKE_STAMP,sizeof(struct timeval));
 				FAKE_STAMP.tv_sec = 100;
 				FAKE_STAMP.tv_usec = 500000;
 				/*********************************/				
-				store_timestamp(time_stamp, FAKE_STAMP);
+				//store_timestamp(time_stamp, FAKE_STAMP);
 				
 				/* construct and send PAUSE */
 				char buf[BUFSIZE];
@@ -507,12 +508,13 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 			} else {
 				/* store/change timestamp */
 				/*********************************/
+				/*
 				struct timeval FAKE_STAMP; // need to be replaced by real time stamp from player
 				bzero(&FAKE_STAMP,sizeof(struct timeval));
 				FAKE_STAMP.tv_sec = 100;
 				FAKE_STAMP.tv_usec = 500000;
 				/*********************************/					
-				store_timestamp(time_stamp, FAKE_STAMP);
+				//store_timestamp(time_stamp, FAKE_STAMP);
 				
 				/* construct and send PLAY */
 				char buf[BUFSIZE];
