@@ -759,6 +759,10 @@ void construct_file_buf(char *file_buf, int play_signal, struct timeval time_sta
 }
 
 void check_file(int *play_state, int *play_signal, struct timeval *time_stamp, char *player_file_name, int *seq_no){
+	/*
+	showSep();
+	printf("in check_file\n");
+	*/
 	FILE *other_side_file = fopen(player_file_name, "r");
 	char *play_state_line = NULL;
 	char *timestamp_line = NULL;
@@ -797,7 +801,11 @@ void check_file(int *play_state, int *play_signal, struct timeval *time_stamp, c
 			free(seq_no_line);
 		fclose(other_side_file);
 	}
-	
+	/*
+	showD("play_state", *play_state);
+	showD("play_signal", *play_signal);
+	showD("seq_no", *seq_no);
+	*/
 }
 
 
@@ -1305,7 +1313,7 @@ double timestamp_to_double(struct timeval tv){
 /* convert double to struct timeval */
 void double_to_timestamp(struct timeval *tv, double db){
 	tv->tv_sec = (time_t)db;
-	tv->tv_usec = (long int)(db-(((double)(tv->tv_sec))*1000000));
+	tv->tv_usec = (long int)((db-((double)(tv->tv_sec)))*1000000);
 	return;
 }
 
