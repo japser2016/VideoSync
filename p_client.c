@@ -73,6 +73,8 @@ int client_need_file(char *buf);
 void first_initial_hello_pkt_lost(int parentfd, int timeout, struct sockaddr_in *client_list, int *client_list_counter, int *need_file, struct sockaddr_in serveraddr, struct sockaddr_in targetaddr);
 void construct_file_buf(char *file_buf, int play_signal, struct timeval time_stamp, int seq_no);
 
+void check_file(int *play_state, int *play_signal, struct timeval *time_stamp, char *player_file_name, int *seq_no);
+
 /* functions handle msg received */
 void handle_initial_hello(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct sockaddr_in clientaddr);
 void handle_userlist(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct sockaddr_in clientaddr, char *msg, int msg_len);
@@ -83,6 +85,7 @@ int add_one_WL_node(struct WaitNode *wait_list, int *WL_counter, struct sockaddr
 int remove_one_node_from_WL(struct WaitNode *wait_list, int *WL_counter, struct sockaddr_in clientaddr);
 int check_resend_user_list(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct WaitNode *wait_list, int WL_counter, int resend_time_sec, int resend_times);
 int check_resend_pause_play(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct WaitNode *wait_list, int WL_counter, int resend_time_sec, int resend_times, struct timeval time_stamp, int signal_type);
+void update_file(int play_state, int play_signal, struct timeval time_stamp, int *seq_no, char *my_file_name);
 
 
 /* send functions */
@@ -117,6 +120,7 @@ int copy_clients_without(struct sockaddr_in *client_list_c, int *client_list_cou
 void showT(int type);
 int wait_node_is_new(struct WaitNode node, struct WaitNode *wait_list, int WL_counter);
 double timestamp_to_double(struct timeval tv);
+void double_to_timestamp(struct timeval *tv, double db);
 
 
  
@@ -181,7 +185,7 @@ int main(int argc, char **argv){
 	_test_read_inputs(portno, vidLoc, des_hostname, des_portno, need_file);
 
 	if (!need_file)
-		system("node video_player/index.js");
+		system("cd video_player; node index.js &");
 	
 	/* set socket & server address & bind port*/
 	parentfd = creat_socket();	
@@ -459,7 +463,8 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 	bzero(file_buf, BUFSIZE);	
 	construct_file_buf(file_buf, *play_signal, *time_stamp, seq_no);	
 	fwrite(file_buf, 1, strlen(file_buf), my_file);
-	fclose(my_file);
+	if (my_file != NULL)
+		fclose(my_file);
 	
 	/* main while */
 	fd_set temp_set;
@@ -469,9 +474,7 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 		//_test_send_to_all(parentfd, client_list, *client_list_counter);
 		
 		/***************************************************/
-		FILE *other_side_file = fopen(player_file_name, "r");
-		
-		fclose(other_side_file);
+		check_file(play_state, play_signal, time_stamp, player_file_name, &seq_no);
 		
 		int same = state_signal_is_same(*play_state, *play_signal);		
 		if (same == 0){
@@ -577,16 +580,18 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
                     if (*need_file) {
                         request_videofile(serveraddr, clientaddr, client_list, *client_list_counter, parentfd);
                         *need_file = 0;
-						system("node video_player/index.js");
+						system("cd video_player; node index.js &");
                     }
 					break;
 				case 3:
 					/* if PAUSE */
 					handle_pause(parentfd, play_state, play_signal, time_stamp, clientaddr, buf, len);
+					update_file(*play_state, *play_signal, *time_stamp, &seq_no, my_file_name);
 					break;
 				case 4:
 					/* if PLAY */
 					handle_play(parentfd, play_state, play_signal, time_stamp, clientaddr, buf, len);
+					update_file(*play_state, *play_signal, *time_stamp, &seq_no, my_file_name);
 					break;
 				case 5:
 					/* if USER LIST ACK */					
@@ -710,7 +715,7 @@ void first_initial_hello_pkt_lost(int parentfd, int timeout, struct sockaddr_in 
 			if (*need_file) {
 				request_videofile(serveraddr, clientaddr, client_list, *client_list_counter, parentfd);
 				*need_file = 0;
-				system("node video_player/index.js");
+				system("cd video_player; node index.js &");
 			}
 			break;
 		} else {
@@ -749,6 +754,48 @@ void construct_file_buf(char *file_buf, int play_signal, struct timeval time_sta
 	bzero(temp_string, BUFSIZE);
 	sprintf(temp_string, "%d\n", seq_no);
 	strcat(file_buf, temp_string);		
+}
+
+void check_file(int *play_state, int *play_signal, struct timeval *time_stamp, char *player_file_name, int *seq_no){
+	FILE *other_side_file = fopen(player_file_name, "r");
+	char *play_state_line = NULL;
+	char *timestamp_line = NULL;
+	char *seq_no_line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	int play_state_f = *play_state;
+	double timestamp_double_f = timestamp_to_double(*time_stamp);
+	int seq_no_f = *seq_no;
+	if (other_side_file != NULL){
+		if ((read = getline(&play_state_line, &len, other_side_file)) != -1){
+			play_state_line[1] = '\0';
+			sscanf(play_state_line, "%d", &play_state_f);
+		}
+		if ((read = getline(&timestamp_line, &len, other_side_file)) != -1){
+			int last_index = strlen(timestamp_line)-1;
+			timestamp_line[last_index] = '\0';
+			sscanf(timestamp_line, "%f", &timestamp_double_f);
+		}
+		if ((read = getline(&seq_no_line, &len, other_side_file)) != -1){
+			int last_index = strlen(seq_no_line)-1;
+			seq_no_line[last_index] = '\0';
+			sscanf(seq_no_line, "%d", &seq_no_f);
+		}
+		if (seq_no_f > *seq_no){
+			/* update seq_no & play_signal & time_stamp */
+			*seq_no = seq_no_f;
+			*play_signal = play_state_f;
+			double_to_timestamp(time_stamp, timestamp_double_f);
+		}
+		if (play_state_line)
+			free(play_state_line);
+		if (timestamp_line)
+			free(timestamp_line);
+		if (seq_no_line)
+			free(seq_no_line);
+		fclose(other_side_file);
+	}
+	
 }
 
 
@@ -1014,6 +1061,17 @@ int check_resend_pause_play(int sockfd, struct sockaddr_in *client_list, int *cl
 	return resend_number;
 }
 
+void update_file(int play_state, int play_signal, struct timeval time_stamp, int *seq_no, char *my_file_name){
+	FILE *my_file = fopen(my_file_name, "w+");
+	char file_buf[BUFSIZE];
+	bzero(file_buf, BUFSIZE);	
+	(*seq_no)++;
+	construct_file_buf(file_buf, play_signal, time_stamp, *seq_no);
+	fwrite(file_buf, 1, strlen(file_buf), my_file);
+	if (my_file != NULL)
+		fclose(my_file);
+}
+
 
 /* send functions */
 int sends(int sockfd, char *buf, int buf_len, struct sockaddr_in targetaddr){
@@ -1240,6 +1298,13 @@ double timestamp_to_double(struct timeval tv){
 	result = (double)tv.tv_sec;
 	result += ((double)tv.tv_usec)/1000000;
 	return result;
+}
+
+/* convert double to struct timeval */
+void double_to_timestamp(struct timeval *tv, double db){
+	tv->tv_sec = (time_t)db;
+	tv->tv_usec = (long int)(db-(((double)(tv->tv_sec))*1000000));
+	return;
 }
 
  
