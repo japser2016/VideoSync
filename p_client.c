@@ -13,11 +13,13 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/time.h>
 #include <errno.h>
+#include <time.h>
 
 #include "p_client_io.h"
 
@@ -25,7 +27,7 @@
 #define ARRAYSIZE 32
 // each struct sockaddr_in has size 16 bytes -> 32*16 = 512 bytes
 #define test_flag 1
-#define REPEAT 2
+#define REPEAT 1
 #define TIMEOUT 1  //for select timeout in seconds
 
 
@@ -36,6 +38,15 @@
 /*   perror(msg); */
 /*   exit(1); */
 /* } */
+
+/*
+ * data structures
+ */
+struct WaitNode{
+	int time_out_count;
+	time_t since; //time(NULL) -> get current time 
+	struct sockaddr_in client;	
+};
 
 /* 
  * main functions 
@@ -59,12 +70,20 @@ int check_msg_type(char *buf, int msg_len);
 void request_videofile(struct sockaddr_in serveraddr, struct sockaddr_in clientaddr,
                        struct sockaddr_in *client_list, int client_list_counter, int parentfd);
 int client_need_file(char *buf);
+void first_initial_hello_pkt_lost(int parentfd, int timeout, struct sockaddr_in *client_list, int *client_list_counter, int *need_file, struct sockaddr_in serveraddr, struct sockaddr_in targetaddr);
+void construct_file_buf(char *file_buf, int play_signal, struct timeval time_stamp, int seq_no);
 
 /* functions handle msg received */
 void handle_initial_hello(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct sockaddr_in clientaddr);
 void handle_userlist(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct sockaddr_in clientaddr, char *msg, int msg_len);
 void handle_pause(int sockfd, int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in clientaddr, char *msg, int msg_len);
 void handle_play(int sockfd, int *play_state, int *play_signal, struct timeval *time_stamp, struct sockaddr_in clientaddr, char *msg, int msg_len);
+
+int add_one_WL_node(struct WaitNode *wait_list, int *WL_counter, struct sockaddr_in clientaddr);
+int remove_one_node_from_WL(struct WaitNode *wait_list, int *WL_counter, struct sockaddr_in clientaddr);
+int check_resend_user_list(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct WaitNode *wait_list, int WL_counter, int resend_time_sec, int resend_times);
+int check_resend_pause_play(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct WaitNode *wait_list, int WL_counter, int resend_time_sec, int resend_times, struct timeval time_stamp, int signal_type);
+
 
 /* send functions */
 int sends(int sockfd, char *buf, int buf_len, struct sockaddr_in targetaddr);
@@ -76,6 +95,7 @@ int construct_play(char *buf, struct timeval time_stamp);
 int construct_play_ack(char *buf);
 int construct_userlist(char *buf, struct sockaddr_in *client_list, int client_list_counter);
 int construct_userlist_ack(char *buf);
+
 
 /* receive functions */
 int receives(int sockfd, char *buf, int buf_len, struct sockaddr_in *serveraddr, int repeat_time);
@@ -94,6 +114,10 @@ int address_is_same(struct sockaddr_in s1, struct sockaddr_in s2);
 int client_is_new(struct sockaddr_in client_address, struct sockaddr_in *client_list, int client_list_counter);
 int timeS_is_same(struct timeval t1, struct timeval t2);
 int copy_clients_without(struct sockaddr_in *client_list_c, int *client_list_counter_c, struct sockaddr_in *client_list, int client_list_counter, struct sockaddr_in except);
+void showT(int type);
+int wait_node_is_new(struct WaitNode node, struct WaitNode *wait_list, int WL_counter);
+double timestamp_to_double(struct timeval tv);
+
 
  
 /*
@@ -119,6 +143,8 @@ void _test_construct_play_ack();
 void _test_copy_clients_without();
 void _test_store_address_list();
 void _test_store_timestamp();
+void _test_set_timeout_address();
+void _test_add_remove_WL();
 
 /*****************************************************************/
 int main(int argc, char **argv){
@@ -137,7 +163,7 @@ int main(int argc, char **argv){
 	
 	/* logic set */
 	int play_state = 0; /* 0 for pause, 1 for play */
-	int play_signal = 1; /* receive play/pause signal from browser */
+	int play_signal = 0; /* receive play/pause signal from browser */
 	struct timeval time_stamp; /* time stamp show watching progress */	
 	time_stamp.tv_sec = 0;
 	time_stamp.tv_usec = 0;
@@ -184,6 +210,9 @@ int main(int argc, char **argv){
 		for (int i = 0; i < REPEAT-1; i++){
 			sends(parentfd, buf, len, targetaddr);
 		}
+		////
+		int time_out_sec = 3; 
+		first_initial_hello_pkt_lost(parentfd, time_out_sec, client_list, &client_list_counter, &need_file, serveraddr, targetaddr);
 	}
 	main_loop(&main_set, &maxSocket, parentfd, &play_state, &play_signal, &time_stamp, client_list, &client_list_counter, &need_file, serveraddr, vidLoc);
 	
@@ -267,9 +296,21 @@ int set_reuse_address(int parentfd){
 /*
  * enable(enable=1) or disable(enable=0) socket's time out
  * timeout duration is set by sec 
+ * return 0 if complete, else -1
  */
 int set_timeout_address(int parentfd, int enable, int sec){
-	return 0;
+	int result = -1;
+	struct timeval tv;
+	if (enable == 0){
+		tv.tv_sec = 0;
+		tv.tv_usec = 0;
+	} else {
+		tv.tv_sec = sec;
+		tv.tv_usec = 0;
+	}
+	result = setsockopt(parentfd, SOL_SOCKET, SO_RCVTIMEO, 
+						(char *)&tv , sizeof(tv));	
+	return result;
 }
 
 /*
@@ -361,31 +402,7 @@ int store_address_list(struct sockaddr_in *out_client_address_list, int out_clie
 	return *client_list_counter;
 }
 
-void request_videofile(struct sockaddr_in serveraddr, struct sockaddr_in clientaddr,
-                       struct sockaddr_in *client_list, int client_list_counter, int parentfd) {
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) 
-        error("ERROR opening socket");
-    
-    if (connect(sockfd, (const struct sockaddr *)&clientaddr, sizeof(clientaddr)) < 0) {
-        int i = 0;
-        for (i = 0; i < client_list_counter; i++) {
-            char buf[BUFSIZE];
-            int len = construct_initial_hello(buf, 1);
-            sends(parentfd, buf, len, client_list[i]);
-            if (connect(sockfd, (const struct sockaddr *)&(client_list[i]), sizeof(client_list[i])) >= 0) {
-                receive_video(sockfd);
-                break;
-            }
-        }
-    } else
-        receive_video(sockfd);
-    close(sockfd);
-}
 
-int client_need_file(char *buf) {
-    return (int)buf[1];
-}
 
 
 /*
@@ -408,12 +425,43 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 	_test_copy_clients_without();
 	_test_store_address_list();
 	_test_store_timestamp();
+	//_test_set_timeout_address();
+	_test_add_remove_WL();
 	
 	
 	/*******************************************/
-    
+    /**************** error handle *************/
+	int resend_time_sec = 3; /* wait time (in seconds) before resending */
+	int resend_times = 3; /* resend times */
+	/* wait list for clients that should send USER LIST ACK */
+	struct WaitNode *WL_user_list_ack = malloc(ARRAYSIZE * sizeof(struct WaitNode)); 
+	bzero(WL_user_list_ack, ARRAYSIZE * sizeof(struct WaitNode));
+	int WL_user_list_ack_counter = 0;
+	/* wait list for clients that should send PAUSE ACK */
+	struct WaitNode *WL_pause_ack = malloc(ARRAYSIZE * sizeof(struct WaitNode)); 
+	bzero(WL_pause_ack, ARRAYSIZE * sizeof(struct WaitNode));
+	int WL_pause_ack_counter = 0;
+	/* wait list for clients that should send PLAY ACK */
+	struct WaitNode *WL_play_ack = malloc(ARRAYSIZE * sizeof(struct WaitNode)); 
+	bzero(WL_play_ack, ARRAYSIZE * sizeof(struct WaitNode));
+	int WL_play_ack_counter = 0;
+	
+	/*************** files **********************/
+	int seq_no = 0;
+	char my_file_name[100] = "syncserver-output";
+	char player_file_name[100] = "webserver-output";
+	FILE *my_file = fopen(my_file_name, "w+");
+	/* file string buf */
+	char file_buf[BUFSIZE];
+	bzero(file_buf, BUFSIZE);	
+	construct_file_buf(file_buf, *play_signal, *time_stamp, seq_no);	
+	fwrite(file_buf, 1, strlen(file_buf), my_file);
+	fclose(my_file);
+	
+	/* main while */
 	fd_set temp_set;
 	int readyNo = 0;	
+	int result;
 	while(1){
 		//_test_send_to_all(parentfd, client_list, *client_list_counter);
 		
@@ -440,6 +488,14 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 				int buf_len = construct_pause(buf, *time_stamp);
 				send_to_all(parentfd, buf, buf_len, client_list, *client_list_counter, REPEAT);
 				
+				/* reset wait list */
+				bzero(WL_pause_ack, ARRAYSIZE * sizeof(struct WaitNode));
+				WL_pause_ack_counter = 0;
+				/* add all clients into the pause ack wait list */
+				for (int i = 0; i < *client_list_counter; i++ ){
+					add_one_WL_node(WL_pause_ack, &WL_pause_ack_counter, client_list[i]);
+				}
+				
 			} else {
 				/* store/change timestamp */
 				/*********************************/
@@ -457,6 +513,14 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 				send_to_all(parentfd, buf, buf_len, client_list, *client_list_counter, REPEAT);
 				/* set play state */
 				*play_state = 1;
+				
+				/* reset wait list */
+				bzero(WL_play_ack, ARRAYSIZE * sizeof(struct WaitNode));
+				WL_play_ack_counter = 0;
+				/* add all clients into the play ack wait list */
+				for (int i = 0; i < *client_list_counter; i++ ){
+					add_one_WL_node(WL_play_ack, &WL_play_ack_counter, client_list[i]);
+				}
 			}
 		}
 		
@@ -488,6 +552,7 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 				showD("len(received)", len);
 				showS("buf", buf);
 				showD("msgType", msg_type);	
+				showT(msg_type);
 				showD("client_list_counter", *client_list_counter);
 			}			
 			/* handle received messages */
@@ -497,6 +562,9 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 					handle_initial_hello(parentfd, client_list, client_list_counter, clientaddr);
                     if (*need_file == 0 && client_need_file(buf))
                         serve_videofile(serveraddr, clientaddr, vidLoc);
+					
+					/* add client to the wait list */
+					result = add_one_WL_node(WL_user_list_ack, &WL_user_list_ack_counter, clientaddr);				
 					break;
 				case 2:
 					/* if USER LIST */
@@ -514,11 +582,27 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 					/* if PLAY */
 					handle_play(parentfd, play_state, play_signal, time_stamp, clientaddr, buf, len);
 					break;
+				case 5:
+					/* if USER LIST ACK */					
+					result = remove_one_node_from_WL(WL_user_list_ack, &WL_user_list_ack_counter, clientaddr);
+				case 6:
+					/* if PAUSE ACK */					
+					result = remove_one_node_from_WL(WL_pause_ack, &WL_pause_ack_counter, clientaddr);
+				case 7:
+					/* if PLAY ACK */					
+					result = remove_one_node_from_WL(WL_play_ack, &WL_play_ack_counter, clientaddr);
+					
 			}
 
             
 		}
-		
+		/* check ACKs and resend data accordingly */
+		/* USER LIST*/
+		check_resend_user_list(parentfd, client_list, client_list_counter, WL_user_list_ack, WL_user_list_ack_counter, resend_time_sec, resend_times);
+		/* PAUSE */
+		check_resend_pause_play(parentfd, client_list, client_list_counter, WL_pause_ack, WL_pause_ack_counter, resend_time_sec, resend_times, *time_stamp, 0);
+		/* PLAY */
+		check_resend_pause_play(parentfd, client_list, client_list_counter, WL_play_ack, WL_play_ack_counter, resend_time_sec, resend_times, *time_stamp, 1);
 	}
 	
 }
@@ -553,6 +637,113 @@ int check_msg_type(char *buf, int msg_len){
 	}
 	return -1;
 }
+
+void request_videofile(struct sockaddr_in serveraddr, struct sockaddr_in clientaddr,
+                       struct sockaddr_in *client_list, int client_list_counter, int parentfd) {
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) 
+        error("ERROR opening socket");
+    
+    if (connect(sockfd, (const struct sockaddr *)&clientaddr, sizeof(clientaddr)) < 0) {
+        int i = 0;
+        for (i = 0; i < client_list_counter; i++) {
+            char buf[BUFSIZE];
+            int len = construct_initial_hello(buf, 1);
+            sends(parentfd, buf, len, client_list[i]);
+            if (connect(sockfd, (const struct sockaddr *)&(client_list[i]), sizeof(client_list[i])) >= 0) {
+                receive_video(sockfd);
+                break;
+            }
+        }
+    } else
+        receive_video(sockfd);
+    close(sockfd);
+}
+
+int client_need_file(char *buf) {
+    return (int)buf[1];
+}
+
+/* 
+ * handle the cases where initial hello ack
+ * is not received correctly
+ */
+void first_initial_hello_pkt_lost(int parentfd, int timeout, struct sockaddr_in *client_list, int *client_list_counter, int *need_file, struct sockaddr_in serveraddr, struct sockaddr_in targetaddr){
+	int time_out_times = 0;
+	
+	while (1){
+		/* receive the message */
+		char buf[BUFSIZE];
+		bzero(buf, BUFSIZE);
+		struct sockaddr_in clientaddr;
+		int clientlen = sizeof(clientaddr);
+		bzero((char *) &clientaddr, sizeof(clientaddr));
+		
+		/* set time out */
+		int result = -1;
+		result = set_timeout_address(parentfd, 1, timeout);
+		int len = recvfrom(parentfd, buf, BUFSIZE, 0,
+				(struct sockaddr *) &clientaddr, &clientlen);
+		int msg_type = check_msg_type(buf, len);
+		/* show msg for debugging */
+		if (test_flag == 1){
+			showSep();
+			printf("From first_initial_hello_pkt_lost\n");
+			showD("result of set timeout", result);
+			showD("len(received)", len);
+			showS("buf", buf);
+			showD("msgType", msg_type);	
+			showT(msg_type);
+			//showD("client_list_counter", *client_list_counter);
+		}	
+		/* cancel time out */
+		result = set_timeout_address(parentfd, 0, 0);
+		if (msg_type == 2){
+			/* if USER LIST */
+			handle_userlist(parentfd, client_list, client_list_counter, clientaddr, buf, len);
+			if (*need_file) {
+				request_videofile(serveraddr, clientaddr, client_list, *client_list_counter, parentfd);
+				*need_file = 0;
+			}
+			break;
+		} else {
+			printf("--------------TIME OUT---------------\n");
+			time_out_times += 1;
+			/* resend the initial hello */
+			bzero(buf, BUFSIZE);
+			len = construct_initial_hello(buf, *need_file);
+			sends(parentfd, buf, len, targetaddr);
+			for (int i = 0; i < REPEAT-1; i++){
+				sends(parentfd, buf, len, targetaddr);
+			}
+		}
+		
+		if (time_out_times >= 3){
+			error("ERROR connecting to main client");
+		}
+	}
+}
+
+/* 
+ * construct 3 line file buf according to the inputs
+ */
+void construct_file_buf(char *file_buf, int play_signal, struct timeval time_stamp, int seq_no){
+	bzero(file_buf, BUFSIZE);
+	/* first line */
+	sprintf(file_buf, "%d", play_signal);
+	strcat(file_buf, "\n");
+	/* second line */
+	double timestamp_double = timestamp_to_double(time_stamp);
+	char temp_string[BUFSIZE];
+	bzero(temp_string, BUFSIZE);
+	snprintf(temp_string, BUFSIZE, "%f\n", timestamp_double);
+	strcat(file_buf, temp_string);
+	/* third line */
+	bzero(temp_string, BUFSIZE);
+	sprintf(temp_string, "%d\n", seq_no);
+	strcat(file_buf, temp_string);		
+}
+
 
 /* functions handle msg received */
 
@@ -596,7 +787,7 @@ void handle_userlist(int sockfd, struct sockaddr_in *client_list, int *client_li
 	char buf[BUFSIZE];
 	bzero(buf, BUFSIZE);
 	int buf_len;
-	buf_len = construct_userlist_ack(buf);
+	buf_len = construct_userlist_ack(buf);	
 	int send_bytes = sends(sockfd, buf, buf_len, clientaddr);
 	/* store the received user list if I am new (with only parent in the client list)*/
 	if ((*client_list_counter) <= 1 && msg_len > 1){
@@ -703,6 +894,119 @@ void handle_play(int sockfd, int *play_state, int *play_signal, struct timeval *
 	}
 	
 }
+/*
+ * initialize current client (clientaddr) WaitNode
+ * check if exsted
+ * if new, store the client (WaitNode) into the wait list
+ * return 1 if success, 0 if not success, -1 if ARRAYSIZE not enough
+ */
+int add_one_WL_node(struct WaitNode *wait_list, int *WL_counter, struct sockaddr_in clientaddr){
+	/* initialize current client WaitNode */
+	struct WaitNode node;
+	bzero((char *) &node, sizeof(struct WaitNode));
+	node.time_out_count = 0;
+	node.since = time(NULL);
+	node.client = clientaddr;
+	/* store the WaitNode to the list */
+	if (wait_node_is_new(node, wait_list, *WL_counter) == 1){
+		if (*WL_counter < ARRAYSIZE){
+			wait_list[(*WL_counter)++] = node;
+			return 1;
+		}
+		printf("add_one_WL_node: add wait list failed -> ARRAYSIZE %d is not enough\n", ARRAYSIZE);
+		return -1;
+	}
+	printf("add_one_WL_node: WaitNode existed\n", ARRAYSIZE);
+	return 0;
+}
+
+/* 
+ * return 1 if success, return 0 if nothing removed
+ */
+int remove_one_node_from_WL(struct WaitNode *wait_list, int *WL_counter, struct sockaddr_in clientaddr){
+	struct WaitNode *WL_copy = malloc(ARRAYSIZE * sizeof(struct WaitNode)); 
+	bzero(WL_copy, ARRAYSIZE * sizeof(struct WaitNode));
+	int WL_copy_counter = 0;
+	
+	for (int i = 0; i < *WL_counter; i++){
+		if (address_is_same(clientaddr, wait_list[i].client) != 1){
+			/* not the target */
+			WL_copy[WL_copy_counter++] = wait_list[i];
+		}
+	}
+	if (WL_copy_counter == (*WL_counter)){
+		/* nothing removed */
+		return 0;
+	}
+	
+	/* copy back to the original wait_list */
+	bzero(wait_list, ARRAYSIZE * sizeof(struct WaitNode));
+	(*WL_counter) = 0;
+	for (int i = 0; i < WL_copy_counter; i++){
+		wait_list[(*WL_counter)++] = WL_copy[i];
+	}
+	
+	free(WL_copy);
+	return 1;
+}
+
+/*
+ * check if ACK timeout resend USER LIST
+ * return resend number
+ */
+int check_resend_user_list(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct WaitNode *wait_list, int WL_counter, int resend_time_sec, int resend_times){
+	int resend_number = 0;
+	for (int i = 0; i < WL_counter; i++){
+		time_t current_time = time(NULL);
+		if ((current_time - wait_list[i].since) >= resend_time_sec && wait_list[i].time_out_count < resend_times ){
+			printf("resend USER LIST\n");
+			/* resend USER LIST */
+			handle_initial_hello(sockfd, client_list, client_list_counter, wait_list[i].client);
+			/* update WaitNode */
+			(wait_list[i].time_out_count)++;
+			wait_list[i].since = time(NULL);
+			/* increase resend number */
+			resend_number++;
+		}
+	}
+	return resend_number;
+}
+
+/*
+ * check if ACK timeout 
+ * resend PAUSE(signal_type=0)/PLAY (signal_type=1)
+ * return resend number
+ */
+int check_resend_pause_play(int sockfd, struct sockaddr_in *client_list, int *client_list_counter, struct WaitNode *wait_list, int WL_counter, int resend_time_sec, int resend_times, struct timeval time_stamp, int signal_type){
+	int resend_number = 0;
+	for (int i = 0; i < WL_counter; i++){
+		time_t current_time = time(NULL);
+		char buf[BUFSIZE];
+		bzero(buf, BUFSIZE);
+		int buf_len;
+		if ((current_time - wait_list[i].since) >= resend_time_sec && wait_list[i].time_out_count < resend_times ){
+			if (signal_type == 0){
+				printf("resend PAUSE\n");				
+				/* construct PAUSE */
+				buf_len = construct_pause(buf, time_stamp);
+			} else {
+				printf("resend PLAY\n");
+				/* construct PLAY */
+				buf_len = construct_play(buf, time_stamp);
+			}
+			/* resend signal */
+			sends(sockfd, buf, buf_len, wait_list[i].client);
+			
+			/* update WaitNode */
+			(wait_list[i].time_out_count)++;
+			wait_list[i].since = time(NULL);
+			/* increase resend number */
+			resend_number++;
+		}
+	}
+	return resend_number;
+}
+
 
 /* send functions */
 int sends(int sockfd, char *buf, int buf_len, struct sockaddr_in targetaddr){
@@ -879,6 +1183,58 @@ int copy_clients_without(struct sockaddr_in *client_list_c, int *client_list_cou
 	}
 	return *client_list_counter_c;
 }
+
+/* print the type of the msg received */
+void showT(int type){
+	switch(type){
+		case 1:
+			printf("   INITIAL HELLO\n");
+			break;
+		case 2:
+			printf("   USER LIST\n");
+			break;
+		case 3:
+			printf("   PAUSE\n");
+			break;
+		case 4:
+			printf("   PLAY\n");
+			break;
+		case 5:
+			printf("   UserList ACK\n");
+			break;
+		case 6:
+			printf("   PAUSE ACK\n");
+			break;
+		case 7:
+			printf("   PLAY ACK\n");
+			break;
+		case 8:
+			printf("   VIDPKT\n");
+			break;
+		case 9:
+			printf("   VIDPKT ACK\n");
+			break;
+	}
+}
+
+/* 1 for new, 0 for existed */
+int wait_node_is_new(struct WaitNode node, struct WaitNode *wait_list, int WL_counter){
+	for (int i = 0; i < WL_counter; i++){
+		if (address_is_same(node.client, wait_list[i].client) == 1){
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/* convert struct timeval to double */
+double timestamp_to_double(struct timeval tv){	
+	double result;
+	result = (double)tv.tv_sec;
+	result += ((double)tv.tv_usec)/1000000;
+	return result;
+}
+
  
 /************************************************/
 /**             testing functions               */
@@ -1526,6 +1882,139 @@ void _test_store_timestamp(){
 	if (time_stamp.tv_sec != 10086 || time_stamp.tv_usec != 983432){
 		showFail(testNo);
 	}
+}
+
+void _test_set_timeout_address(){
+	if (!test_flag)
+		return;
+	showSep();
+	printf("_test_set_timeout_address:\n");
+	int testNo = 0;
+	int result = 2;
+	
+	char buf[BUFSIZE];
+	bzero(buf, BUFSIZE);
+	int portno = 9999;
+	int parentfd = creat_socket();
+	set_reuse_address(parentfd);
+	struct sockaddr_in serveraddr; 
+	struct sockaddr_in clientaddr; 
+	bzero((char *) &clientaddr, sizeof(clientaddr));
+	bzero((char *) &serveraddr, sizeof(serveraddr));
+	int clientlen = sizeof(clientaddr);
+	
+	my_server_address_build(portno, &serveraddr);
+	socket_port_bind(parentfd, &serveraddr);
+	_test_parentfd_serverAddress_no_bind(parentfd, serveraddr);
+	
+	testNo = 1;
+	result = set_timeout_address(parentfd, 1, 3);
+	int len = recvfrom(parentfd, buf, BUFSIZE, 0,
+					(struct sockaddr *) &clientaddr, &clientlen);
+	result = set_timeout_address(parentfd, 0, 3);
+	
+	close(parentfd);
+}
+
+void _test_add_remove_WL(){
+	if (!test_flag)
+		return;
+	showSep();
+	printf("_test_add_remove_WL:\n");
+	int testNo = 0;
+	int result = 2;
+	
+	/* outside client list */
+	struct sockaddr_in *out_client_address_list = malloc(ARRAYSIZE * sizeof(struct sockaddr_in));
+	bzero(out_client_address_list, ARRAYSIZE * sizeof(struct sockaddr_in));
+	int out_client_address_list_counter = 0;
+	
+	/* prepare addresses */
+	struct sockaddr_in s0;
+	target_server_address_build("localhost", 8888, &s0);
+	struct sockaddr_in s1;
+	target_server_address_build("localhost", 9999, &s1);
+	struct sockaddr_in s2;
+	target_server_address_build("localhost", 1000, &s2);
+	struct sockaddr_in s3;
+	target_server_address_build("localhost", 1500, &s3);
+	struct sockaddr_in s11;
+	target_server_address_build("localhost", 2000, &s11);
+	
+	/* load out_client_address_list */
+	out_client_address_list[out_client_address_list_counter++] = s0;
+	out_client_address_list[out_client_address_list_counter++] = s1;
+	out_client_address_list[out_client_address_list_counter++] = s2;
+	out_client_address_list[out_client_address_list_counter++] = s3;
+	
+	
+	
+	/* prepare WL */
+	struct WaitNode *wait_list = malloc(ARRAYSIZE * sizeof(struct WaitNode)); 
+	bzero(wait_list, ARRAYSIZE * sizeof(struct WaitNode));
+	int WL_counter = 0;
+	
+	/* test add_one_WL_node() */
+	testNo = 1;
+	result = add_one_WL_node(wait_list, &WL_counter, s0);
+	if (result != 1 || WL_counter != 1){
+		showFail(testNo);
+	}
+	
+	testNo = 2;
+	result = add_one_WL_node(wait_list, &WL_counter, s1);
+	if (result != 1 || WL_counter != 2){
+		showFail(testNo);
+	}
+	
+	testNo = 3;
+	result = add_one_WL_node(wait_list, &WL_counter, s2);
+	if (result != 1 || WL_counter != 3){
+		showFail(testNo);
+	}
+	
+	testNo = 4;
+	for (int i = 0; i < WL_counter; i++){
+		if (address_is_same(out_client_address_list[i], wait_list[i].client) != 1){
+			showFail(testNo);
+		}
+	}
+	
+	/* test remove_one_node_from_WL() */
+	testNo = 5;
+	result = remove_one_node_from_WL(wait_list, &WL_counter, s3);
+	if (result != 0 || WL_counter != 3){
+		showFail(testNo);
+	}
+	
+	testNo = 5;
+	result = remove_one_node_from_WL(wait_list, &WL_counter, s1);
+	if (result != 1 || WL_counter != 2){
+		showFail(testNo);
+	}
+	
+	testNo = 6;
+	for (int i = 0; i < WL_counter; i++){
+		if (i != 1){
+			int j = i;
+			if (i == 2)
+				j = 1;
+			if (address_is_same(out_client_address_list[i], wait_list[j].client) != 1){
+				showFail(testNo);
+			}
+		}
+	}
+	
+	testNo = 7;
+	bzero(wait_list, ARRAYSIZE * sizeof(struct WaitNode));
+	WL_counter = 0;
+	result = remove_one_node_from_WL(wait_list, &WL_counter, s0);
+	if (result != 0 || WL_counter != 0){
+		showFail(testNo);
+	}
+	
+	free(wait_list);
+	free(out_client_address_list);
 }
 
 
