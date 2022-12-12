@@ -458,14 +458,17 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 	char my_file_name[100] = "syncserver-output";
 	char player_file_name[100] = "webserver-output";
 	FILE *my_file = fopen(my_file_name, "w+");
+    FILE *player_file = fopen(player_file_name, "w+");
 	/* file string buf */
 	char file_buf[BUFSIZE];
 	bzero(file_buf, BUFSIZE);	
 	construct_file_buf(file_buf, *play_signal, *time_stamp, seq_no);	
 	fwrite(file_buf, 1, strlen(file_buf), my_file);
+    fwrite(file_buf, 1, strlen(file_buf), player_file);
 	if (my_file != NULL)
 		fclose(my_file);
-	
+	if (player_file != NULL)
+        fclose(player_file);
 	/* main while */
 	fd_set temp_set;
 	int readyNo = 0;	
@@ -474,6 +477,7 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 		//_test_send_to_all(parentfd, client_list, *client_list_counter);
 		
 		/***************************************************/
+        
 		check_file(play_state, play_signal, time_stamp, player_file_name, &seq_no);
 		
 		int same = state_signal_is_same(*play_state, *play_signal);		
@@ -801,7 +805,7 @@ void check_file(int *play_state, int *play_signal, struct timeval *time_stamp, c
 			free(seq_no_line);
 		fclose(other_side_file);
 	}
-	/*
+    /*
 	showD("play_state", *play_state);
 	showD("play_signal", *play_signal);
 	showD("seq_no", *seq_no);

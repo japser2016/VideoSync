@@ -51,10 +51,15 @@ http.createServer( (req, res) => {
             fs.readFile("../syncserver-output", function(err, data) {
                 if (!err) {
                     var sync_playing = Number(data.slice(0,1));
+                    //console.log("p:"+sync_playing);
                     var temp1 = data.indexOf("\n");
+                    //console.log("temp1:"+temp1);
                     var temp2 = data.indexOf("\n", temp1 + 1);
-                    var sync_timestamp = Number(data.slice(temp1 + 1,temp2));
-                    var sync_index = Number(data.slice(data.indexOf("\n",temp2 + 1) + 1));
+                    //console.log("temp2:"+temp2);
+                    var sync_timestamp = parseFloat(data.slice(temp1 + 1,temp2));
+                    //console.log("ts:"+sync_timestamp);
+                    var sync_index = Number(data.slice(temp2 + 1));
+                    //console.log("ind:"+sync_index);
                     
                     if (sync_index > index) {
                         index = sync_index;
