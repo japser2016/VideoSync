@@ -66,6 +66,10 @@ http.createServer( (req, res) => {
                         playing = sync_playing;
                         timestamp = sync_timestamp;
                         changed = 1;
+                        var output = playing + "\n" + timestamp + "\n" + index + "\n";
+                        fs.writeFile('../webserver-output', output, function (err) {
+                            if (err) throw err;
+                        });
                     }
                 }
             });

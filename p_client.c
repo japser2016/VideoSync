@@ -775,6 +775,8 @@ void check_file(int *play_state, int *play_signal, struct timeval *time_stamp, c
 	ssize_t read;
 	int play_state_f = *play_state;
 	double timestamp_double_f = timestamp_to_double(*time_stamp);
+    showSep();
+    printf("current timestamp: %f\n",timestamp_double_f);
 	int seq_no_f = *seq_no;
 	if (other_side_file != NULL){
 		if ((read = getline(&play_state_line, &len, other_side_file)) != -1){
@@ -782,9 +784,12 @@ void check_file(int *play_state, int *play_signal, struct timeval *time_stamp, c
 			sscanf(play_state_line, "%d", &play_state_f);
 		}
 		if ((read = getline(&timestamp_line, &len, other_side_file)) != -1){
-			int last_index = strlen(timestamp_line)-1;
-			timestamp_line[last_index] = '\0';
-			sscanf(timestamp_line, "%f", &timestamp_double_f);
+            printf("timestamp line: %s\n",timestamp_line);
+			int last_index = strlen(timestamp_line)-2;
+			//timestamp_line[last_index] = '\0';
+            char *end;
+			timestamp_double_f = strtod(timestamp_line,&end);
+            printf("changing timestamp to: %f\n",timestamp_double_f);
 		}
 		if ((read = getline(&seq_no_line, &len, other_side_file)) != -1){
 			int last_index = strlen(seq_no_line)-1;

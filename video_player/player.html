@@ -10,7 +10,7 @@
       {
           player = document.getElementById('video_player');
           player.controls = false;
-          setInterval(get_data, 2000);
+          setInterval(get_data, 500);
       }
       function play_vid()
       {
@@ -82,14 +82,14 @@
                                   "\nand timestamp: "+data.timestamp);
                       if (playing != data.playing) {
                           playing = data.playing;
-                          if(playing)
+                          if(playing) {
                               player.play();
-                          else
+                          }
+                          else {
                               player.pause();
+                          }
+                          player.currentTime = data.timestamp;
                       }
-                      //if (Math.abs(player.currentTime - data.timestamp) > 2) {
-                      player.currentTime = data.timestamp;
-                      //}
                   }
               });
           
