@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "p_client_io.h"
 
@@ -39,16 +40,19 @@ void serve_videofile(struct sockaddr_in serveraddr, struct sockaddr_in clientadd
 
 
 int send_video(int sockfd, char *vidLoc) {
-
+    struct stat st;
+    stat(vidLoc, &st);
+    uint32_t sz = st.st_size;    
     
     struct VIDPKT *vid = malloc(sizeof(struct VIDPKT));
     bzero(vid,sizeof(struct VIDPKT));
     vid->type = (char)8;
+    vid->size = sz;
     printf("filename len: %d\n", strlen(vidLoc));
     strcpy(vid->filename, vidLoc);
     printf("filename len: %d\n", strlen(vid->filename));
     printf("file: %s\n",vid->filename);
-    int x = write(sockfd, vid, strlen(vid->filename) + 2);
+    int x = write(sockfd, vid, strlen(vid->filename) + 6);
     printf("wrote %d bytes for setting up video xfer\n",x);
 
     //wait for ack
@@ -98,6 +102,8 @@ int receive_video(int sockfd) {
         return -1;
     char filename[128] = "video_player/video";
     printf("filename %s\n",vid->filename);
+
+    uint32_t filesize = vid->size;
     //strcat(filename,strchr(vid->filename, '.'));
     char ack[1];
     ack[0] = (char) 9;
@@ -105,6 +111,10 @@ int receive_video(int sockfd) {
     
     int fd = open(filename, O_WRONLY|O_CREAT|O_SYNC|O_APPEND, S_IRUSR|S_IWUSR);
     char *buf = malloc(VIDBUFSIZE);
+    double amount = 0.0;
+    //uint64_t start_time = get_timestamp();
+    uint32_t amt_written = 0;
+    int state = 0;
     while (n > 0) {
         bzero(buf, VIDBUFSIZE);
 
@@ -119,6 +129,20 @@ int receive_video(int sockfd) {
         //printf("wrote %d bytes to file\n",m);
         if (m < 0)
             error("failed to write to file");
+        amt_written += n;
+        amount = (double)amt_written / (double)filesize;
+        if(state == 0 && amount > .25) {
+            printf("25% Downloaded\n");
+            state = 1;
+        }
+        if(state == 1 && amount > .5) {
+            printf("50% Downloaded\n");
+            state = 2;
+        }
+        if(state == 2 && amount > .75) {
+            printf("75% Downloaded\n");
+            state = 3;
+        }
     }
     free(vid);
     free(buf);

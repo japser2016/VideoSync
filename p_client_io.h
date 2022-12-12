@@ -4,7 +4,7 @@
 
 #define BUFSIZE 1024
 
-#define VIDBUFSIZE 8192
+#define VIDBUFSIZE 262144
 
 int send_video(int sockfd, char *vidLoc); // Sends video specified by the filename in vidLoc to the specified socket
 
@@ -16,5 +16,6 @@ void error(char *msg);
 
 struct VIDPKT {
     char type; // type=8
+    uint32_t size;
     char filename[128];
 }__attribute__((packed));  ; 
