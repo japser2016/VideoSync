@@ -776,7 +776,7 @@ void check_file(int *play_state, int *play_signal, struct timeval *time_stamp, c
 	ssize_t read;
 	int play_state_f = *play_state;
 	double timestamp_double_f = timestamp_to_double(*time_stamp);
-    showSep();
+    //showSep();
     //printf("current timestamp: %f\n",timestamp_double_f);
 	int seq_no_f = *seq_no;
 	if (other_side_file != NULL){
