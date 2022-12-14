@@ -29,7 +29,7 @@
 #define test_flag 1
 #define REPEAT 1
 #define TIMEOUT 0  //for select timeout in seconds
-#define TIMEOUT_USEC 100  //for select timeout in usec (1/1000000 second)
+#define TIMEOUT_USEC 10  //for select timeout in usec (1/1000000 second)
 
 
 /*
