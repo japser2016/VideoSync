@@ -4,3 +4,4 @@ test
 test/*
 *-output
 *-input
+video_player/video
