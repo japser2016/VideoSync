@@ -59,8 +59,8 @@ http.createServer( (req, res) => {
                     var sync_timestamp = parseFloat(data.slice(temp1 + 1,temp2));
                     //console.log("ts:"+sync_timestamp);
                     var sync_index = Number(data.slice(temp2 + 1));
-                    //console.log("ind:"+sync_index);
-                    
+                    //console.log("old_ind:"+index);
+                    //console.log("new_ind:"+sync_index);
                     if (sync_index > index) {
                         index = sync_index;
                         playing = sync_playing;

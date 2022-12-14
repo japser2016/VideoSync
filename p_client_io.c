@@ -108,7 +108,7 @@ int receive_video(int sockfd) {
     char ack[1];
     ack[0] = (char) 9;
     write(sockfd, ack, 1);
-    
+    remove(filename);
     int fd = open(filename, O_WRONLY|O_CREAT|O_SYNC|O_APPEND, S_IRUSR|S_IWUSR);
     char *buf = malloc(VIDBUFSIZE);
     double amount = 0.0;
