@@ -28,7 +28,8 @@
 // each struct sockaddr_in has size 16 bytes -> 32*16 = 512 bytes
 #define test_flag 1
 #define REPEAT 1
-#define TIMEOUT 1  //for select timeout in seconds
+#define TIMEOUT 0  //for select timeout in seconds
+#define TIMEOUT_USEC 100  //for select timeout in usec (1/1000000 second)
 
 
 /*
@@ -542,7 +543,7 @@ void main_loop(fd_set *main_set, int *maxSocket, int parentfd, int *play_state, 
 		/* set select() time out interval to TIMEOUT seconds */
 		struct timeval timeout;
 		timeout.tv_sec = TIMEOUT;
-		timeout.tv_usec = 0;
+		timeout.tv_usec = TIMEOUT_USEC;
 		//printf("before select\n");
 		readyNo = select(*maxSocket+1, &temp_set, NULL, NULL, &timeout);
 		//printf("after select\n");
