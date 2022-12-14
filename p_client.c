@@ -776,8 +776,10 @@ void check_file(int *play_state, int *play_signal, struct timeval *time_stamp, c
 	ssize_t read;
 	int play_state_f = *play_state;
 	double timestamp_double_f = timestamp_to_double(*time_stamp);
-    //showSep();
-    //printf("current timestamp: %f\n",timestamp_double_f);
+	/*
+    showSep();
+    printf("current timestamp: %f\n",timestamp_double_f);
+	*/
 	int seq_no_f = *seq_no;
 	if (other_side_file != NULL){
 		if ((read = getline(&play_state_line, &len, other_side_file)) != -1){
@@ -1058,6 +1060,7 @@ int check_resend_pause_play(int sockfd, struct sockaddr_in *client_list, int *cl
 		char buf[BUFSIZE];
 		bzero(buf, BUFSIZE);
 		int buf_len;
+		time_t time_diff = current_time - wait_list[i].since;
 		if ((current_time - wait_list[i].since) >= resend_time_sec && wait_list[i].time_out_count < resend_times ){
 			if (signal_type == 0){
 				printf("resend PAUSE\n");				
@@ -1066,6 +1069,7 @@ int check_resend_pause_play(int sockfd, struct sockaddr_in *client_list, int *cl
 			} else {
 				printf("resend PLAY\n");
 				/* construct PLAY */
+				time_stamp.tv_sec = time_stamp.tv_sec + time_diff;
 				buf_len = construct_play(buf, time_stamp);
 			}
 			/* resend signal */
