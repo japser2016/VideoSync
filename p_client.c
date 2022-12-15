@@ -272,6 +272,7 @@ void read_inputs(int argc, char **argv, int *portno, char *vidLoc, char *des_hos
 	if (argc == 3){
 		strcpy(vidLoc, argv[2]);
 	} else {
+        strcpy(vidLoc, "video_player/video");
 		strcpy(des_hostname, argv[2]);
 		*des_portno = atoi(argv[3]);	
 		*need_file = atoi(argv[4]);	
